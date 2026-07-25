@@ -1,0 +1,28 @@
+# Core runtime
+ollama
+PyYAML
+psutil==5.9.8
+
+# Web search skill
+requests
+beautifulsoup4
+
+# Voice I/O
+SpeechRecognition
+faster-whisper
+pyttsx3
+pynput
+
+# Vision skill
+ultralytics
+opencv-python
+openvino
+
+# Document drafting skill
+python-docx
+
+# Windows-only system audio control (media_control skill degrades gracefully
+# on other platforms rather than failing to load)
+pyautogui; sys_platform == "win32"
+pycaw; sys_platform == "win32"
+comtypes; sys_platform == "win32"

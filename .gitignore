@@ -1,0 +1,43 @@
+# Virtual environment (1.1 GB, contains binaries far over GitHub's file limit)
+friday_env/
+venv/
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Model weights and exported artifacts - regenerate with openvino_yolo11_opt.py
+*.pt
+*.onnx
+FRIDAY_CORE/yolo11n_openvino_model/
+
+# Local runtime state and personal data
+FRIDAY_CORE/config/settings.yaml
+FRIDAY_CORE/memory.db
+*.db
+FRIDAY_CORE/test_results.log
+*.log
+FRIDAY_CORE/fleet_market_ledger.csv
+
+# Debug scratch output
+FRIDAY_CORE/scratch/
+
+# Generated documents
+FRIDAY_Draft_*.docx
+
+# Personal documents and local tooling directives
+*.pdf
+claude.md
+CLAUDE.md
+
+# Sample/benchmark media
+FRIDAY_CORE/bus.jpg
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,43 @@
+# Copy this file to config/settings.yaml and edit it.
+#
+# config/settings.yaml is git-ignored: it holds the operator's personal
+# details and machine-specific hardware indices, neither of which belong in
+# version control. Anything omitted here falls back to core/config.py DEFAULTS.
+
+assistant:
+  name: FRIDAY
+  wake_word: friday
+  # How the assistant addresses you in conversation.
+  address_user_as: Sir
+
+user:
+  # Injected into the LLM system prompt so replies are grounded in who is
+  # speaking. Leave as-is for a generic install.
+  name: the operator
+  location: ""
+  interests: ""
+
+llm:
+  # Any model tag available to your local Ollama instance.
+  model: llama3.1
+  # Hard ceiling on ReAct iterations, so a confused model cannot loop forever.
+  max_react_steps: 5
+  history_length: 10
+
+audio:
+  # null = let speech_recognition choose the system default microphone.
+  # Set an integer to pin a specific device; enumerate them with:
+  #   python -c "import speech_recognition as sr; print(sr.Microphone.list_microphone_names())"
+  input_device_index: null
+  # Seconds of silence before an utterance is treated as finished.
+  pause_threshold: 2.0
+  phrase_time_limit: 10
+  speech_rate: 175
+
+vision:
+  # OpenCV camera index. 0 is the default built-in webcam.
+  camera_index: 0
+  # Directory holding the exported OpenVINO IR model, relative to the
+  # project root. Regenerate it with: python benchmarks/openvino_yolo11_opt.py
+  model_dir: yolo11n_openvino_model
+  confidence: 0.5

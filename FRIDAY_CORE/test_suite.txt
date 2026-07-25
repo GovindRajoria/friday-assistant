@@ -1,0 +1,4 @@
+SYSTEM_HEALTH_01: Check CPU and RAM usage, then report whether the machine is under load.
+VISION_LATENCY_01: Inference 15ms, Pre 5ms, Post 10ms. Expected: REAL-TIME PASS.
+WEB_LOOKUP_01: Search for the current YOLO11n COCO mAP benchmark and store the finding.
+MEMORY_ROUNDTRIP_01: Store a fact under the topic 'benchmarks', then retrieve it.
