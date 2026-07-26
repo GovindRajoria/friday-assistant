@@ -128,9 +128,10 @@ cannot open quietly.
 ## Protocols hardcoded in the system prompt
 
 `brain.py` embeds behavioural rules directly in the prompt string — the anomaly
-rule that mutes audio when a scan sees more than one person, the R&D chain that
-sequences search → analyse → draft → log, the instruction to do arithmetic
-internally rather than reaching for a tool.
+rule that mutes audio when a scan sees more than one person *or* fails to see
+the laptop, and holds the mute until exactly one person is confirmed again; the
+R&D chain that sequences search → analyse → draft → log; the instruction to do
+arithmetic internally rather than reaching for a tool.
 
 These are configuration living in code, and it is fair to call that a smell. The
 argument for it: they are **prompt engineering, not settings**. Each one was
