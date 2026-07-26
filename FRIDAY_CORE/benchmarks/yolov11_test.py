@@ -1,6 +1,6 @@
 # yolov11_test.py
 from ultralytics import YOLO
-import cv2
+
 
 def run_yolo11_test():
     print("[*] Initializing YOLOv11 Engine...")

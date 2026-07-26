@@ -3,9 +3,8 @@ import platform
 from collections import Counter
 
 import cv2
-from ultralytics import YOLO
-
 from core.config import SETTINGS, vision_model_path
+from ultralytics import YOLO
 
 
 class ScanEnvironmentSkill:

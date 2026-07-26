@@ -1,8 +1,10 @@
 # core brain.py
-import ollama
 import json
 
+import ollama
+
 from core.config import SETTINGS
+
 
 class FridayBrain:
     def __init__(self, model=None, settings=None):
@@ -234,7 +236,7 @@ class FridayBrain:
             reply = response['message']['content']
             self._update_history("assistant", reply)
             return reply
-        except Exception as e:
+        except Exception:
             return "I'm having trouble thinking right now. Please try again."
 
     def _update_history(self, role, content):

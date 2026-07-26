@@ -1,7 +1,8 @@
 # openvino_yolo11_opt.py
-from ultralytics import YOLO
 import time
-import os
+
+from ultralytics import YOLO
+
 
 def optimize_and_benchmark():
     print("[*] OpenVINO Optimization Protocol Initiated...")
@@ -31,14 +32,16 @@ def optimize_and_benchmark():
         # 4. Benchmarking
         print("[*] Measuring optimized inference speed...")
         start_time = time.time()
-        results = ov_model.predict(source=img_url, verbose=False)
+        # The detections are discarded on purpose: this measures latency, and
+        # accuracy is not what the export is being checked for.
+        ov_model.predict(source=img_url, verbose=False)
         end_time = time.time()
         
         inference_time_ms = (end_time - start_time) * 1000
         print("\n" + "="*40)
         print("OPENVINO OPTIMIZATION REPORT")
         print("="*40)
-        print(f"Target Hardware: Intel/Nvidia Heterogeneous")
+        print("Target Hardware: Intel/Nvidia Heterogeneous")
         print(f"Inference Time (Optimized): {inference_time_ms:.2f} ms")
         print(f"Projected FPS: {1000/inference_time_ms:.1f}")
         print(f"Baseline comparison: 35.43ms -> {inference_time_ms:.2f}ms")

@@ -1,12 +1,14 @@
 # core/main.py
-import os
 import importlib
+import os
 from pathlib import Path
+
 from core.brain import FridayBrain
 from core.config import PROJECT_ROOT, SETTINGS
-from core.speaker import FridaySpeaker
-from core.listener import FridayListener
 from core.interrupt_handler import InterruptHandler
+from core.listener import FridayListener
+from core.speaker import FridaySpeaker
+
 
 class FridayCore:
     def __init__(self, settings=None):
@@ -168,7 +170,8 @@ class FridayCore:
             
             decision = self.brain.analyze_intent(batch_prompt, self.active_skills)
             while decision.get("intent") not in ["final_answer", "unknown"]:
-                if self.interrupter.interrupted: break
+                if self.interrupter.interrupted:
+                    break
                 
                 intent = decision.get("intent")
                 params = decision.get("parameters", {})

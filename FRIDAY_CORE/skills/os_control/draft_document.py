@@ -1,12 +1,11 @@
 # skills/os_control/draft_document.py
-import os
 from pathlib import Path
 
+import ollama
+from core.config import SETTINGS
 from docx import Document
 from docx.shared import Pt
-import ollama
 
-from core.config import SETTINGS
 
 class DraftDocumentSkill:
     def __init__(self):

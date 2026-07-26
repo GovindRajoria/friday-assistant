@@ -1,6 +1,6 @@
 # core/interrupt_handler.py
-import threading
 from pynput import keyboard
+
 
 class InterruptHandler:
     def __init__(self):

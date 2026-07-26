@@ -1,0 +1,15 @@
+# The rule set is pinned explicitly rather than left to ruff's defaults, which
+# have changed between releases — an unpinned selection makes a lint gate that
+# passes today and fails on a version bump for reasons unrelated to the code.
+#
+# Deliberately excluded:
+#   UP  — would rewrite typing constructs to syntax newer than the Python 3.10
+#         this project targets in places, and the rewrites are noise here.
+#   BLE — skills catch broad exceptions on purpose. A skill that raises takes the
+#         whole assistant down mid-conversation; returning an error message lets
+#         the reasoning loop recover and say so.
+line-length = 120
+exclude = ["friday_env", "yolo11n_openvino_model"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]

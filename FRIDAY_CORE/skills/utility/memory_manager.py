@@ -1,9 +1,10 @@
 # skills/utility/memory_manager.py
-import sqlite3
 import datetime
-import ollama
+import sqlite3
 
+import ollama
 from core.config import PROJECT_ROOT, SETTINGS
+
 
 class MemoryManagerSkill:
     def __init__(self):

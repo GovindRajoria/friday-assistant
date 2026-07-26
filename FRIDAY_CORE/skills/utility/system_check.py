@@ -1,6 +1,7 @@
 # skills/utility/system_check.py
 import psutil
 
+
 class SystemCheckSkill:
     def __init__(self):
         # The manifest is critical. The LLM reads this to know when to trigger the skill.

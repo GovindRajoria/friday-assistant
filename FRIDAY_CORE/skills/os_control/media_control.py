@@ -33,8 +33,8 @@ class MediaControlSkill:
         to media keys.
         """
         try:
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
             from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
             devices = AudioUtilities.GetSpeakers()
             activate = getattr(devices, 'Activate', getattr(devices, 'activate', None))
@@ -60,8 +60,9 @@ class MediaControlSkill:
             }
 
         try:
-            import pyautogui
             import winsound
+
+            import pyautogui
 
             if action == "set_volume":
                 try:

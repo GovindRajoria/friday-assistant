@@ -1,5 +1,7 @@
 # FRIDAY
 
+[![CI](https://github.com/GovindRajoria/friday-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/GovindRajoria/friday-assistant/actions/workflows/ci.yml)
+
 A voice-driven desktop assistant that runs entirely on local hardware. Speech recognition, reasoning, and text-to-speech all execute on-device — there is no cloud API in the loop, and no audio or camera data leaves the machine.
 
 The interesting part is not the voice interface; it is the reasoning loop. FRIDAY implements **ReAct** (Reason + Act) on top of a local Llama 3.1 via Ollama, so it can chain several tools together to answer one request — search the web, do arithmetic internally, write the result to a document, then commit a note to long-term memory — deciding each step from the outcome of the last one.
@@ -10,16 +12,32 @@ Built May 2026.
 
 ## How it works
 
+```mermaid
+flowchart LR
+  mic(["microphone"]) --> stt["faster-whisper<br/>wake word + STT"]
+  kbd(["keypress"]) --> typed["typed input"]
+
+  stt --> brain
+  typed --> brain
+
+  subgraph loop["ReAct loop — bounded by max_react_steps"]
+    brain["FridayBrain<br/>Ollama · Llama 3.1"]
+    trunc["truncate at PAUSE<br/>discards fabricated Observations"]
+    parse{"Final Answer<br/>or Action?"}
+    exec["skill.execute(params)"]
+
+    brain --> trunc --> parse
+    parse -->|"Action + Action Input"| exec
+    exec -->|"Observation:"| brain
+  end
+
+  kill(["Delete key"]) -.->|"interrupt flag,<br/>checked each iteration"| loop
+
+  parse -->|"Final Answer:"| tts["pyttsx3"] --> spk(["speaker"])
 ```
-        speech ──▶ faster-whisper ──┐
-                                    ├──▶ FridayBrain ──▶ Action + Action Input
-        keypress ──▶ typed input ───┘      (Ollama)              │
-                                               ▲                 ▼
-                                               │            skill.execute()
-                                        Observation ◀────────────┘
-                                               │
-                                    "Final Answer:" ──▶ pyttsx3 ──▶ speech
-```
+
+Everything in that diagram runs on the machine it is installed on. No audio,
+frame, or transcript is sent anywhere.
 
 ### The reasoning loop
 
@@ -34,7 +52,13 @@ Two details that took iteration to get right:
 
 `core/main.py` walks `skills/` with `rglob("*.py")`, imports each module, and calls its `setup()`. Whatever comes back is registered under its `manifest["name"]`. Adding a capability means dropping a file into `skills/` — no registry to edit, no imports to wire up.
 
-The registry is keyed by manifest name, so **two skills declaring the same name silently overwrite each other**. Keep names unique.
+The registry is keyed by manifest name, so **two skills declaring the same name silently overwrite each other**. Keep names unique — `tools/check_manifests.py` enforces it, and CI runs it on every push:
+
+```bash
+cd FRIDAY_CORE && python tools/check_manifests.py
+```
+
+It reads the manifests with `ast` rather than importing them, so it needs none of the runtime dependencies and works on a machine with no model, no microphone and no camera.
 
 ### Interrupts
 
@@ -160,11 +184,15 @@ FRIDAY_CORE/
 │   └── interrupt_handler.py Global kill-switch listener
 ├── skills/                  Auto-discovered capabilities, grouped by domain
 ├── benchmarks/              YOLO11 / OpenVINO export and latency measurement
+├── tools/
+│   └── check_manifests.py   Static manifest validation; what CI runs
 ├── config/
 │   └── settings.example.yaml
 ├── requirements.txt
 └── skills.sh                Cross-platform bootstrap
 ```
+
+Design decisions and the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 
 ---
 
@@ -175,7 +203,8 @@ Stated plainly, because they are the honest state of the project:
 - Prompt-based tool routing is brittle. The model occasionally appends prose to an `Action:` line or invents a tool that does not exist; the guardrails in `brain.py` catch the common failure modes but not all of them.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
-- There is no test suite. `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, and validates every skill manifest — real gates, but static ones. The reasoning loop, speech recognition, and every skill's `execute()` are exercised only by hand.
+- `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 
 ---
 

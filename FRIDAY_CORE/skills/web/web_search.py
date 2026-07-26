@@ -1,9 +1,9 @@
 # skills/web/web_search.py
+import ollama
 import requests
 from bs4 import BeautifulSoup
-import ollama
-
 from core.config import SETTINGS
+
 
 class WebSearchSkill:
     def __init__(self):

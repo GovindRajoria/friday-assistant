@@ -1,6 +1,7 @@
 # skills/os_control/app_launcher.py
-import subprocess
 import platform
+import subprocess
+
 
 class AppLauncherSkill:
     def __init__(self):

@@ -1,7 +1,8 @@
 # yolo11_comparison.py
-from ultralytics import YOLO
 import time
-import cv2
+
+from ultralytics import YOLO
+
 
 def run_yolo11_performance_test():
     print("[*] YOLOv11 Performance Benchmark Initiated...")
@@ -30,7 +31,7 @@ def run_yolo11_performance_test():
         print("\n" + "="*40)
         print("YOLOv11 HARDWARE PERFORMANCE REPORT")
         print("="*40)
-        print(f"Model: YOLO11n")
+        print("Model: YOLO11n")
         print(f"Inference Time: {inference_time_ms:.2f} ms")
         print(f"FPS Equivalent: {1000/inference_time_ms:.1f}")
         
