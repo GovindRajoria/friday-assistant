@@ -111,6 +111,12 @@ class FridayCore:
                 final_answer = self._run_graph(user_input, speak=True)
                 self.memory_buffer.append(f"FRIDAY: {final_answer}")
 
+                # Only the last `history_length` lines are ever read back, and
+                # this process is meant to stay up for days. Drop everything
+                # older than twice that rather than growing a list nothing
+                # will look at again.
+                del self.memory_buffer[:-2 * self.settings["llm"]["history_length"]]
+
     def run_batch_test(self):
         import datetime
         test_file = PROJECT_ROOT / "test_suite.txt"
