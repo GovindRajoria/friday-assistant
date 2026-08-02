@@ -39,7 +39,6 @@ from core.config import SETTINGS
 from core.graph import build_graph
 from core.registry import discover_skills
 from core.session import SPOKEN_EVENT_TYPES, run_turn
-from core.speaker import FridaySpeaker
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from server import events
@@ -102,6 +101,15 @@ class _SpeechThread:
             import comtypes
             comtypes.CoInitialize()
         try:
+            # Imported here rather than at module scope so that importing this
+            # module does not require pyttsx3. CI installs neither
+            # requirements.txt nor an audio device, and the tests run with
+            # server.speak off, so this thread never starts there — but a
+            # module-level import would still have made the whole test file
+            # uncollectable. Same reason core/llm_client.py imports ollama
+            # inside get_client().
+            from core.speaker import FridaySpeaker
+
             speaker = FridaySpeaker(settings=settings)
             while True:
                 text = self._queue.get()
