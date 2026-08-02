@@ -20,9 +20,40 @@ user:
 llm:
   # Any model tag available to your local Ollama instance.
   model: llama3.1
-  # Hard ceiling on ReAct iterations, so a confused model cannot loop forever.
-  max_react_steps: 5
+  # Where the graph's chat calls go. Point this at a Pi 5 or a second Intel
+  # box to offload inference; every call in the project goes through
+  # core/llm_client.py, so this is the only place that has to change.
+  host: http://127.0.0.1:11434
+  # Hard ceiling on graph steps, enforced by core/graph.py on the whole chain
+  # (not just malformed-output resamples, as the old brain.py bounded).
+  max_react_steps: 12
   history_length: 10
+  # Low temperature because routing wants determinism, not flair.
+  temperature: 0.1
+
+vlm:
+  # No VLM is installed yet (Phase 4). Left here so the config shape exists
+  # before anything reads it.
+  enabled: false
+  backend: ollama  # "ollama" | "openvino"
+  model: moondream
+  # May differ from llm.host if the VLM ends up on different hardware.
+  host: http://127.0.0.1:11434
+
+screen:
+  # Continuous screen awareness (Phase 4). Disabled until the capture
+  # pipeline exists.
+  enabled: false
+  interval_seconds: 15
+  # Perceptual-hash hamming distance; how different two frames must be before
+  # a describe pass is worth paying for.
+  change_threshold: 6
+  monitor: 1
+
+server:
+  # FastAPI + WebSocket layer (Phase 2). Bind 127.0.0.1 only.
+  host: 127.0.0.1
+  port: 8756
 
 audio:
   # null = let speech_recognition choose the system default microphone.

@@ -26,8 +26,11 @@ jobs:
       # which need audio and camera devices a runner does not have. Nothing
       # below needs them, and installing them would buy a slower job that still
       # could not exercise the runtime.
+      # langgraph and pytest are the exception: the reasoning graph is pure
+      # Python over those two, and the tests mock the model client, so this
+      # stays a seconds-long job on a runner with no GPU, camera or model.
       - name: Install
-        run: pip install ruff==0.16.0
+        run: pip install ruff==0.16.0 pytest==9.1.1 langgraph==1.2.10
 
       # Pinned version: an unpinned linter is a gate that can fail on a release
       # unrelated to any change here.
@@ -45,3 +48,11 @@ jobs:
       - name: Skill manifests
         working-directory: FRIDAY_CORE
         run: python tools/check_manifests.py
+
+      # Graph routing and the anomaly guard, both exercised against fakes. This
+      # is the first thing in CI that tests behaviour rather than shape: the
+      # step bound, the tool dispatch, and the mute rule all run here without a
+      # model, a microphone or a camera.
+      - name: Tests
+        working-directory: FRIDAY_CORE
+        run: python -m pytest tests -q

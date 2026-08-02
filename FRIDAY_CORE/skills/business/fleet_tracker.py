@@ -22,7 +22,8 @@ class FleetTrackerSkill:
                 writer = csv.writer(file)
                 writer.writerow(["Timestamp", "Vehicle Model", "Location", "Avg Price (Lakhs)", "Notes"])
 
-    def execute(self, params):
+    def execute(self, params=None):
+        params = params or {}
         model = params.get("vehicle_model", "Unknown")
         price = params.get("average_price_lakhs", 0.0)
         location = params.get("location", "Delhi NCR")

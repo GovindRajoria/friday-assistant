@@ -1,56 +1,80 @@
 # core/main.py
-import importlib
-import os
-from pathlib import Path
-
-from core.brain import FridayBrain
 from core.config import PROJECT_ROOT, SETTINGS
+from core.graph import build_graph
 from core.interrupt_handler import InterruptHandler
 from core.listener import FridayListener
+from core.registry import discover_skills
 from core.speaker import FridaySpeaker
 
 
 class FridayCore:
     def __init__(self, settings=None):
         self.settings = settings or SETTINGS
-        self.active_skills = {}
         self.speaker = FridaySpeaker(settings=self.settings)
         self.listener = FridayListener(settings=self.settings)
 
         # Announce boot sequence
         self.speaker.speak("Initializing core systems.")
 
-        self.load_antigravity_skills()
-        self.brain = FridayBrain(settings=self.settings)
-        
+        self.active_skills = discover_skills()
+        self.graph = build_graph(self.active_skills)
+
+        # Short-term conversational memory, carried across turns and fed into
+        # each new request so follow-up questions have something to refer to.
+        self.memory_buffer = []
+
         # Emergency Interrupt System
         self.interrupter = InterruptHandler()
-        
+
         self.speaker.speak("All systems online. I am ready when you are.")
 
-    def load_antigravity_skills(self):
-        print("[*] Initializing Antigravity Modules...")
-        # Use absolute path relative to the project root
-        project_root = Path(__file__).parent.parent
-        skills_dir = project_root / "skills"
-        
-        for file_path in skills_dir.rglob("*.py"):
-            if file_path.name == "__init__.py":
-                continue
-            
-            # Convert absolute path to relative module name
-            relative_path = file_path.relative_to(project_root)
-            module_name = str(relative_path.with_suffix('')).replace(os.sep, '.')
-            print(f"[*] Discovering: {module_name} at {file_path}")
-            try:
-                module = importlib.import_module(module_name)
-                if hasattr(module, 'setup'):
-                    skill_instance = module.setup()
-                    skill_name = skill_instance.manifest['name']
-                    self.active_skills[skill_name] = skill_instance
-                    print(f"[+] Loaded: {skill_name}")
-            except Exception as e:
-                print(f"[-] Failed to load {module_name}: {e}")
+    def _run_graph(self, user_input, speak):
+        """Drive the graph to completion, streaming its narration.
+
+        This is the single narration consumer — nodes never call the speaker
+        directly, which is what keeps Phase 2's WebSocket fanout from ever
+        speaking a line twice. `speak=False` is used for batch testing, where
+        only the final answer is logged, not spoken.
+        """
+        history_length = self.settings["llm"]["history_length"]
+        state = {
+            "user_input": user_input,
+            "memory_buffer": "\n".join(self.memory_buffer[-history_length:]),
+            "messages": [],
+            "steps": 0,
+        }
+        final_answer = ""
+
+        for update in self.graph.stream(state, {"recursion_limit": 40}, stream_mode="updates"):
+            if self.interrupter.interrupted:
+                # Leave the flag set rather than resetting it here. The voice
+                # loop resets it at the top of its own while-loop; batch
+                # testing relies on it staying set so the outer test-case
+                # loop sees it and stops the whole run, not just this case.
+                if speak:
+                    self.speaker.speak("Manual override. Thought process terminated.")
+                return "Thought process terminated by emergency override."
+
+            for delta in update.values():
+                # A node that returns {} (anomaly_guard on the common "nothing
+                # changed" path) streams as None under stream_mode="updates",
+                # not {} — observed directly against langgraph 1.2.10, not
+                # documented behavior. Skipping it here is required, not
+                # defensive: without this check, a routine turn with no
+                # anomaly crashes the driver.
+                if not delta:
+                    continue
+                for line in delta.get("narration", []):
+                    if speak:
+                        self.speaker.speak(line)
+                if delta.get("final_answer"):
+                    final_answer = delta["final_answer"]
+
+        if not final_answer:
+            final_answer = "I worked through that but have no answer to give."
+        if speak:
+            self.speaker.speak(final_answer)
+        return final_answer
 
     def run_continuous_voice_loop(self):
         wake_word = self.settings["assistant"]["wake_word"].upper()
@@ -58,13 +82,9 @@ class FridayCore:
         print(f"[LIVE] Say '{wake_word}' to wake the assistant.")
         print("="*50 + "\n")
 
-        # Initialize short-term conversational memory
-        if not hasattr(self, 'memory_buffer'):
-            self.memory_buffer = []
-
         while True:
             self.interrupter.reset() # Reset for new command
-            
+
             # The listener now handles both Voice and Keyboard (Hybrid Input)
             user_input = self.listener.listen(require_wake_word=True)
 
@@ -86,71 +106,16 @@ class FridayCore:
                     self.run_batch_test()
                     continue
 
-                # Add user input to short-term hippocampus
-                self.memory_buffer.append(f"User: {user_input}")
-                recent_context = "\n".join(self.memory_buffer[-10:])
-
-                # 1. Trigger the Initial Brain Cycle
                 print("[*] Suspending listener for cognitive processing...")
-                decision = self.brain.analyze_intent(
-                    user_prompt=user_input,
-                    active_skills=self.active_skills,
-                    memory_buffer=recent_context
-                )
-
-                # 2. The ReAct Ping-Pong Loop
-                while decision.get("intent") not in ["final_answer", "unknown"]:
-                    
-                    # --- THE KILL SWITCH CHECK ---
-                    if self.interrupter.interrupted:
-                        self.speaker.speak("Manual override. Thought process terminated.")
-                        decision = {"intent": "final_answer", "message": "Thought process terminated by emergency override."}
-                        self.interrupter.reset()
-                        break
-
-                    # --- Speak the thought out loud before acting ---
-                    if decision.get("thought"):
-                        self.speaker.speak(decision.get("thought"))
-
-                    intent = decision.get("intent")
-                    params = decision.get("parameters", {})
-                    react_messages = decision.get("react_messages", [])
-
-                    print(f"\n[*] FRIDAY EXECUTING ACTION: {intent}")
-                    print(f"[*] PARAMS: {params}")
-
-                    # Execute the chosen tool
-                    if intent in self.active_skills:
-                        try:
-                            tool_result = self.active_skills[intent].execute(params)
-                            observation = tool_result.get("message", str(tool_result))
-                        except Exception as e:
-                            observation = f"Error executing tool: {str(e)}"
-                    else:
-                        observation = f"Error: The tool '{intent}' does not exist or failed to load."
-
-                    print(f"[*] OBSERVATION: {observation}")
-
-                    # Feed the observation back to the Brain
-                    decision = self.brain.resume_react(react_messages, observation)
-
-                # 3. Speak the Final Answer
-                
-                # --- Speak her very last thought before delivering the final answer ---
-                if decision.get("thought"):
-                    self.speaker.speak(decision.get("thought"))
-                
-                final_message = decision.get("message", "I experienced a critical failure in my cognitive loop.")
-                self.speaker.speak(final_message)
-                
-                # Save FRIDAY's final response to short-term memory
-                self.memory_buffer.append(f"FRIDAY: {final_message}")
+                self.memory_buffer.append(f"User: {user_input}")
+                final_answer = self._run_graph(user_input, speak=True)
+                self.memory_buffer.append(f"FRIDAY: {final_answer}")
 
     def run_batch_test(self):
         import datetime
         test_file = PROJECT_ROOT / "test_suite.txt"
         log_file = PROJECT_ROOT / "test_results.log"
-        
+
         if not test_file.exists():
             self.speaker.speak("I couldn't find the test suite file.")
             return
@@ -164,38 +129,18 @@ class FridayCore:
             if self.interrupter.interrupted:
                 self.speaker.speak("Batch testing terminated.")
                 break
-            
+
             print(f"\n[TEST {i+1}/{len(test_cases)}] Processing: {test_case}")
             batch_prompt = f"BATCH_TEST_MODE: {test_case}"
-            
-            decision = self.brain.analyze_intent(batch_prompt, self.active_skills)
-            while decision.get("intent") not in ["final_answer", "unknown"]:
-                if self.interrupter.interrupted:
-                    break
-                
-                intent = decision.get("intent")
-                params = decision.get("parameters", {})
-                react_messages = decision.get("react_messages", [])
-                
-                if intent in self.active_skills:
-                    try:
-                        tool_result = self.active_skills[intent].execute(params)
-                        observation = tool_result.get("message", str(tool_result))
-                    except Exception as e:
-                        observation = f"Error: {str(e)}"
-                else:
-                    observation = f"Error: Tool {intent} not found."
-                
-                decision = self.brain.resume_react(react_messages, observation)
 
-            final_answer = decision.get("message", "Logic processing failed.")
+            final_answer = self._run_graph(batch_prompt, speak=False)
             results.append(f"CASE: {test_case}\nRESULT: {final_answer}\n" + "-"*30)
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(log_file, "a") as f:
             f.write(f"\n\n=== NATIVE TEST RUN: {timestamp} ===\n")
             f.write("\n".join(results))
-        
+
         self.speaker.speak("Testing complete. Results logged.")
 
 if __name__ == "__main__":
