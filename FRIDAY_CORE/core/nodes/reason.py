@@ -11,7 +11,7 @@ def reason_node(state: AgentState, active_skills: dict) -> dict:
     messages = state.get("messages") or [
         {"role": "system", "content": build_system_prompt(active_skills)},
         {"role": "user", "content": build_user_message(
-            state["user_input"], state.get("memory_buffer", ""))},
+            state["user_input"], state.get("memory_buffer", ""), state.get("screen_context", ""))},
     ]
 
     raw = llm_client.chat(messages, fmt=build_action_schema(active_skills))

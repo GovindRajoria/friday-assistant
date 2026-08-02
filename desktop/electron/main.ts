@@ -25,14 +25,29 @@ const HEALTH_URL = `http://${SERVER_HOST}:${SERVER_PORT}/health`;
 const HEALTH_POLL_BUDGET_MS = 60_000;
 const HEALTH_POLL_INTERVAL_MS = 500;
 
-// electron-vite writes main/preload/renderer to sibling directories under
-// out/ in both `electron-vite dev` and `electron-vite build` — dev is not
-// an in-memory run of electron/main.ts, it builds this file to disk too,
-// just with a watcher. __dirname is therefore out/main in both modes, and
-// three levels up from there lands on the repo root (desktop/../.. is
-// FRIDAY, the parent of both desktop/ and FRIDAY_CORE/).
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
-const FRIDAY_CORE_DIR = path.join(REPO_ROOT, "FRIDAY_CORE");
+// Where the Python backend lives, which is not the same question in a dev
+// checkout as in an installed app.
+//
+// Unpackaged, electron-vite has written this file to out/main in both `dev`
+// and `build` — dev is not an in-memory run of electron/main.ts, it builds
+// to disk too, just with a watcher. So __dirname is out/main either way, and
+// three levels up lands on the repo root (desktop/../.. is FRIDAY, the parent
+// of both desktop/ and FRIDAY_CORE/).
+//
+// Packaged, that resolution walks into app.asar and finds nothing. The
+// installer ships only the shell — bundling a 1.1 GB virtualenv, a vision
+// model and a 4.9 GB language model into an installer is not a thing anyone
+// wants to download — so an installed HUD has to be told where an existing
+// backend is. FRIDAY_CORE_DIR is that answer, and the directory beside the
+// executable is the fallback for keeping the two side by side.
+function resolveFridayCoreDir(): string {
+  const fromEnv = process.env.FRIDAY_CORE_DIR;
+  if (fromEnv) return path.resolve(fromEnv);
+  if (!app.isPackaged) return path.join(path.resolve(__dirname, "..", "..", ".."), "FRIDAY_CORE");
+  return path.join(path.dirname(app.getPath("exe")), "FRIDAY_CORE");
+}
+
+const FRIDAY_CORE_DIR = resolveFridayCoreDir();
 const PYTHON_EXE = path.join(FRIDAY_CORE_DIR, "friday_env", "Scripts", "python.exe");
 
 let mainWindow: BrowserWindow | null = null;

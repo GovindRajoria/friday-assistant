@@ -103,9 +103,38 @@ the socket.
 **Voice input is not wired into the server.** The microphone stays with the
 console entry point; the socket carries typed prompts only.
 
-A turn can be stopped with `{"type": "cancel"}`. The flag is reset at the
-start of every turn, so cancelling turn N is not also a request to kill
-turn N+1.
+### Continuous screen awareness
+
+Off by default. With `screen.enabled: true`, a background thread grabs the
+monitor, decides whether enough has changed to be worth looking at, and asks a
+local vision model to describe it. The latest description is folded into the
+next turn's prompt once, and streamed to the HUD as a `screen_context` event.
+
+```bash
+ollama pull moondream
+```
+
+Three things shape the design, all measured on this machine rather than
+assumed:
+
+- **A describe pass is cheap: ~0.19 s median at 1280 px, and a screen grab is
+  28 ms.** The interval is 5 seconds, which is comfortable rather than tight.
+- **Two models on one Ollama process contend.** The same call took **4.86 s**
+  while the language model was working. So the watcher is told when a turn is
+  in flight and **skips that cycle** rather than queueing it, since a queued
+  call would land mid-turn and pay the same penalty anyway.
+- **A change gate makes an idle desktop nearly free.** Frames are compared by
+  perceptual hash, and a screen that has not changed costs a grab and a hash,
+  no inference.
+
+`vision/describers/` puts the model behind a `Describer` protocol.
+`OllamaVLM` is the working one; an OpenVINO implementation drops in beside it
+without the graph or the server changing.
+
+**The descriptions are rough.** moondream is a small model, and it will
+misread a screen — at 768 px it invented a program name that was not there,
+which is why frames are sent at 1280. Treat it as ambient context, not fact.
+Empty replies are dropped rather than published.
 
 ### The desktop shell
 
@@ -130,6 +159,30 @@ npm run dev      # or: npm run build && npx electron .
 
 If `node_modules/electron/dist/` is missing after install, the Electron binary
 download did not run — `node node_modules/electron/install.js` fetches it.
+
+**Building an executable:**
+
+```bash
+cd desktop
+npm run package
+```
+
+That writes `desktop/release/`: a portable `FRIDAY <version>.exe` that runs
+with no installation, and `FRIDAY Setup <version>.exe`, an installer. Both are
+about 86 MB, and both are unsigned — Windows SmartScreen will warn on first
+run.
+
+**The installer ships the shell only.** The Python backend, its virtualenv,
+the vision model and a 4.9 GB language model are not bundled; an installer
+carrying all of that would be several gigabytes and stale the moment a skill
+changed. A packaged app finds the backend through the `FRIDAY_CORE_DIR`
+environment variable, or in a `FRIDAY_CORE` directory beside its own
+executable:
+
+```powershell
+$env:FRIDAY_CORE_DIR = "E:\FRIDAY\FRIDAY_CORE"
+& ".\release\FRIDAY 0.1.0.exe"
+```
 
 The window stays hidden until the backend answers or a 60-second budget
 expires, because a cold start loads the vision model and every skill and takes
@@ -265,6 +318,10 @@ FRIDAY_CORE/
 ├── server/
 │   ├── app.py               FastAPI: /health probe, /ws turn stream, single-flight
 │   └── events.py            Typed event envelopes sent over the socket
+├── vision/
+│   ├── capture.py           mss grab, downscale, and the perceptual-hash change gate
+│   ├── watcher.py           Background capture loop; skips a cycle while a turn runs
+│   └── describers/          Describer protocol: OllamaVLM now, OpenVINO later
 ├── skills/                  Auto-discovered capabilities, grouped by domain
 ├── benchmarks/              YOLO11 / OpenVINO export and latency measurement
 ├── tools/
@@ -301,6 +358,9 @@ Stated plainly, because they are the honest state of the project:
 - The server has no authentication. It is safe only because it refuses to bind to anything but a loopback address — any process on the machine can drive it, and it can launch applications and write files. Exposing the port would hand those capabilities to the network.
 - If the Electron main process is killed outright rather than closed, a backend it spawned is orphaned. The kill runs from `before-quit`, `window-all-closed` and `process.on('exit')`, none of which fire on a hard kill. There is no watchdog; the next launch attaches to the survivor rather than colliding with it.
 - The orb never shows "speaking". The backend hands narration to a fire-and-forget speech thread and emits nothing when it finishes, so there is no event that could return the orb to idle afterwards — it goes straight back to idle when a turn ends rather than claiming a state whose end cannot be observed.
+- Screen descriptions come from a small model and are frequently wrong in detail. They are ambient context injected into the prompt, not a source of truth, and nothing downstream validates them.
+- Screen capture is local and never leaves the machine, but it is still a capture of whatever is on screen — it is off by default and worth leaving off while handling anything sensitive.
+- The packaged executable is unsigned, and it contains only the shell. It cannot run without a Python backend already installed on the machine, located through FRIDAY_CORE_DIR or placed beside the executable.
 - The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate, the process kill and the click-through toggling are verified by hand.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 - Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.

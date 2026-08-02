@@ -32,6 +32,11 @@ ABSENT_IN_CI = [
     "ollama", "ultralytics", "cv2", "psutil", "docx", "pyttsx3", "pynput",
     "speech_recognition", "faster_whisper", "pyautogui", "pycaw", "comtypes",
     "bs4",
+    # Phase 4 (continuous screen awareness). Both are pure-Python-ish and
+    # small, but the brief for this phase is explicit: CI does not install
+    # them, so vision/capture.py and everything importing it must keep them
+    # out of the module-scope import chain server/app.py sits in.
+    "mss", "PIL",
 ]
 
 # The modules CI imports: the graph under test, the turn runner, and the

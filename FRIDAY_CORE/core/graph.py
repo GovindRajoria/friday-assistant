@@ -51,7 +51,16 @@ def route_after_reason(state: AgentState) -> str:
 
 
 def route_after_act(state: AgentState) -> str:
-    # Only a scan produces detections worth guarding on.
+    # Only scan_environment (the webcam skill) produces detections worth
+    # guarding on. This is deliberately webcam-specific, not just an
+    # oversight to extend later (open item 2, carried from the Phase 4
+    # plan): the screen watcher added in Phase 4 (vision/watcher.py) is not
+    # a graph action at all. It runs on its own background thread outside
+    # any turn, and it writes prose into state["screen_context"], never
+    # counts into state["detections"] — there is nothing shaped like an
+    # anomaly for this guard to see from it. If a future skill produces
+    # person/object counts from something other than the webcam, add it to
+    # this check explicitly rather than widening it speculatively now.
     return "anomaly_guard" if state.get("action") == "scan_environment" else "reason"
 
 

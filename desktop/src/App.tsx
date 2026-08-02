@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { Orb } from "./components/Orb";
 import { PromptInput } from "./components/PromptInput";
+import { ScreenContext } from "./components/ScreenContext";
 import { Transcript } from "./components/Transcript";
 import { useAgentSocket } from "./hooks/useAgentSocket";
 import "./App.css";
@@ -42,6 +43,7 @@ export function App() {
       <div className="hud__content">
         <Orb state={state.orb} connected={state.connected} />
         <Transcript entries={state.transcript} />
+        <ScreenContext text={state.screenContext} />
         <PromptInput onSubmit={sendPrompt} onCancel={sendCancel} disabled={!state.connected} />
       </div>
     </div>

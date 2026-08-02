@@ -8,7 +8,7 @@ function agentEvent(event: AgentEvent, id = "id-1") {
 
 describe("reducer", () => {
   it("starts idle and disconnected", () => {
-    expect(initialState).toEqual({ orb: "idle", connected: false, transcript: [] });
+    expect(initialState).toEqual({ orb: "idle", connected: false, transcript: [], screenContext: "" });
   });
 
   it("marks connected on a connected action", () => {
@@ -52,6 +52,23 @@ describe("reducer", () => {
     expect(state.orb).toBe("thinking");
   });
 
+  it("stores a screen_context event in its own field, not the transcript", () => {
+    const state = agentEvent({ type: "screen_context", payload: { text: "a desk with two monitors" } });
+    expect(state.screenContext).toBe("a desk with two monitors");
+    expect(state.transcript).toEqual([]);
+  });
+
+  it("replaces the previous screen_context rather than accumulating", () => {
+    const first = agentEvent({ type: "screen_context", payload: { text: "one monitor" } });
+    const second = reducer(first, {
+      kind: "agent_event",
+      event: { type: "screen_context", payload: { text: "two monitors" } },
+      id: "id-2",
+    });
+    expect(second.screenContext).toBe("two monitors");
+    expect(second.transcript).toEqual([]);
+  });
+
   it("renders a plain text event's payload verbatim", () => {
     const state = agentEvent({ type: "thought", payload: { text: "checking the weather" } });
     expect(state.transcript).toEqual([{ id: "id-1", type: "thought", text: "checking the weather" }]);
@@ -78,6 +95,6 @@ describe("reducer", () => {
   it("does not mutate the previous state object", () => {
     const before = initialState;
     agentEvent({ type: "thought", payload: { text: "x" } });
-    expect(before).toEqual({ orb: "idle", connected: false, transcript: [] });
+    expect(before).toEqual({ orb: "idle", connected: false, transcript: [], screenContext: "" });
   });
 });
