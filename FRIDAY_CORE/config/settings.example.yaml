@@ -54,6 +54,10 @@ server:
   # FastAPI + WebSocket layer (Phase 2). Bind 127.0.0.1 only.
   host: 127.0.0.1
   port: 8756
+  # Set false while iterating on the server so it does not talk out loud on
+  # every restart. The live settings.yaml is what most people edit for this,
+  # not this example file.
+  speak: true
 
 audio:
   # null = let speech_recognition choose the system default microphone.

@@ -4,6 +4,10 @@ langgraph
 PyYAML
 psutil==5.9.8
 
+# FastAPI + WebSocket layer
+fastapi
+uvicorn
+
 # Test runner
 pytest
 

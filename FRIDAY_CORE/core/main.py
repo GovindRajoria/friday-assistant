@@ -4,6 +4,7 @@ from core.graph import build_graph
 from core.interrupt_handler import InterruptHandler
 from core.listener import FridayListener
 from core.registry import discover_skills
+from core.session import SPOKEN_EVENT_TYPES, run_turn
 from core.speaker import FridaySpeaker
 
 
@@ -29,52 +30,26 @@ class FridayCore:
         self.speaker.speak("All systems online. I am ready when you are.")
 
     def _run_graph(self, user_input, speak):
-        """Drive the graph to completion, streaming its narration.
+        """Drive the graph to completion, speaking its narration as it streams.
 
-        This is the single narration consumer — nodes never call the speaker
-        directly, which is what keeps Phase 2's WebSocket fanout from ever
-        speaking a line twice. `speak=False` is used for batch testing, where
-        only the final answer is logged, not spoken.
+        A thin wrapper around core.session.run_turn — the turn-running logic
+        (the None-delta skip, the interrupt early-return) lives there now so
+        the WebSocket server can drive the same graph without duplicating it.
+        This is still the single narration consumer on the console side —
+        nodes never call the speaker directly. `speak=False` is used for
+        batch testing, where only the final answer is logged, not spoken.
         """
-        history_length = self.settings["llm"]["history_length"]
-        state = {
-            "user_input": user_input,
-            "memory_buffer": "\n".join(self.memory_buffer[-history_length:]),
-            "messages": [],
-            "steps": 0,
-        }
-        final_answer = ""
+        def emit(event_type, payload):
+            if not speak or event_type not in SPOKEN_EVENT_TYPES:
+                return
+            text = payload.get("text")
+            if text:
+                self.speaker.speak(text)
 
-        for update in self.graph.stream(state, {"recursion_limit": 40}, stream_mode="updates"):
-            if self.interrupter.interrupted:
-                # Leave the flag set rather than resetting it here. The voice
-                # loop resets it at the top of its own while-loop; batch
-                # testing relies on it staying set so the outer test-case
-                # loop sees it and stops the whole run, not just this case.
-                if speak:
-                    self.speaker.speak("Manual override. Thought process terminated.")
-                return "Thought process terminated by emergency override."
-
-            for delta in update.values():
-                # A node that returns {} (anomaly_guard on the common "nothing
-                # changed" path) streams as None under stream_mode="updates",
-                # not {} — observed directly against langgraph 1.2.10, not
-                # documented behavior. Skipping it here is required, not
-                # defensive: without this check, a routine turn with no
-                # anomaly crashes the driver.
-                if not delta:
-                    continue
-                for line in delta.get("narration", []):
-                    if speak:
-                        self.speaker.speak(line)
-                if delta.get("final_answer"):
-                    final_answer = delta["final_answer"]
-
-        if not final_answer:
-            final_answer = "I worked through that but have no answer to give."
-        if speak:
-            self.speaker.speak(final_answer)
-        return final_answer
+        return run_turn(
+            self.graph, user_input, self.memory_buffer, self.interrupter, emit,
+            history_length=self.settings["llm"]["history_length"],
+        )
 
     def run_continuous_voice_loop(self):
         wake_word = self.settings["assistant"]["wake_word"].upper()
