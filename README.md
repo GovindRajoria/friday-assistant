@@ -103,6 +103,38 @@ the socket.
 **Voice input is not wired into the server.** The microphone stays with the
 console entry point; the socket carries typed prompts only.
 
+A turn can be stopped with `{"type": "cancel"}`. The flag is reset at the
+start of every turn, so cancelling turn N is not also a request to kill
+turn N+1.
+
+### The desktop shell
+
+`desktop/` is an Electron + React + Vite front end for the same server — a
+frameless, transparent, always-on-top window showing an orb, the event
+transcript, and a prompt box. It is click-through except while the pointer is
+over it, so it can sit on top of other work without swallowing clicks.
+
+**It attaches rather than assumes ownership.** On launch it probes `/health`
+first; if something already answers on 8756 it attaches and will not stop that
+server on quit. Only a server it spawned itself is ever killed. The kill uses
+`taskkill /T` on Windows, and that is load-bearing rather than belt-and-braces:
+`friday_env\Scripts\python.exe` is a redirector that launches the real
+interpreter as a child process, so signalling only the process it spawned would
+leave the actual server running.
+
+```bash
+cd desktop
+npm install
+npm run dev      # or: npm run build && npx electron .
+```
+
+If `node_modules/electron/dist/` is missing after install, the Electron binary
+download did not run — `node node_modules/electron/install.js` fetches it.
+
+The window stays hidden until the backend answers or a 60-second budget
+expires, because a cold start loads the vision model and every skill and takes
+around twelve seconds.
+
 ---
 
 ## Writing a skill
@@ -242,6 +274,16 @@ FRIDAY_CORE/
 │   └── settings.example.yaml
 ├── requirements.txt
 └── skills.sh                Cross-platform bootstrap
+
+desktop/
+├── electron/
+│   ├── main.ts              Attach-or-spawn backend, health gate, window, tree kill
+│   └── preload.ts           contextBridge; the renderer's only route to Electron
+└── src/
+    ├── reducer.ts           Pure event → HUD state; unit-tested without a socket
+    ├── hooks/useAgentSocket.ts  Socket, reconnect, dispatch into the reducer
+    ├── events.ts            Event-type union, gated against server/events.py
+    └── components/          Orb, Transcript, PromptInput
 ```
 
 Design decisions and the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
@@ -257,7 +299,9 @@ Stated plainly, because they are the honest state of the project:
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
 - **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs seventeen pytest cases against the graph, the guard and the server — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - The server has no authentication. It is safe only because it refuses to bind to anything but a loopback address — any process on the machine can drive it, and it can launch applications and write files. Exposing the port would hand those capabilities to the network.
-- A turn cannot be cancelled over the socket. The Delete-key interrupt belongs to the console's `pynput` listener; a client that sends a prompt waits for it to finish or aborts on the step bound.
+- If the Electron main process is killed outright rather than closed, a backend it spawned is orphaned. The kill runs from `before-quit`, `window-all-closed` and `process.on('exit')`, none of which fire on a hard kill. There is no watchdog; the next launch attaches to the survivor rather than colliding with it.
+- The orb never shows "speaking". The backend hands narration to a fire-and-forget speech thread and emits nothing when it finishes, so there is no event that could return the orb to idle afterwards — it goes straight back to idle when a turn ends rather than claiming a state whose end cannot be observed.
+- The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate, the process kill and the click-through toggling are verified by hand.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 - Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.
 

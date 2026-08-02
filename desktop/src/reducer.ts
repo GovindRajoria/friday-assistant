@@ -8,6 +8,9 @@
 // here reaches back out to a socket.
 import type { AgentEvent, AgentEventType } from "./events";
 
+// "speaking" is declared but never produced by orbForEvent below. The
+// backend has no speech-completion event, so nothing could move the orb out
+// of it; it stays in the union as the state to use once one exists.
 export type OrbState = "idle" | "thinking" | "speaking" | "error";
 
 export interface TranscriptEntry {
@@ -55,7 +58,13 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
       return "thinking";
     case "answer":
     case "status":
-      return "speaking";
+      // Both end a turn, so the orb goes back to idle. It does not go to
+      // "speaking": the backend hands narration to a fire-and-forget speech
+      // thread and emits nothing when that finishes, so there is no event
+      // that could ever move the orb out of it again. Showing a state we
+      // cannot observe the end of leaves the HUD stuck claiming the agent is
+      // still talking long after it stopped.
+      return "idle";
     case "anomaly":
     case "error":
       return "error";

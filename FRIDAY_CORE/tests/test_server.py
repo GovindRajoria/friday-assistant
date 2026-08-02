@@ -206,9 +206,12 @@ def test_cancel_message_ends_a_turn_in_flight(monkeypatch):
         event = json.loads(ws.receive_text())
 
         # run_turn checks interrupter.interrupted before it processes the
-        # first streamed update, so the turn ends there — no "thought" or
-        # "answer" ever reaches the socket, only the override status.
-        assert event["type"] == "status"
+        # first streamed update, so the turn ends there and the override
+        # message is the only event of the turn. It has to arrive as
+        # `answer`, the terminal type: a client has no other signal that a
+        # turn is over, and while this asserted `status` a cancelled turn
+        # left the HUD waiting forever for an answer that never came.
+        assert event["type"] == "answer"
         assert "override" in event["payload"]["text"].lower()
 
     # A cancelled turn still has to release single-flight, or the server is

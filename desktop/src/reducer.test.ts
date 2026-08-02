@@ -31,8 +31,10 @@ describe("reducer", () => {
   it.each([
     ["thought", "thinking"],
     ["observation", "thinking"],
-    ["answer", "speaking"],
-    ["status", "speaking"],
+    // Terminal events return the orb to idle; see orbForEvent on why
+    // neither goes to "speaking".
+    ["answer", "idle"],
+    ["status", "idle"],
     ["anomaly", "error"],
     ["error", "error"],
   ] as const)("routes a %s event to orb state %s", (type, expected) => {
