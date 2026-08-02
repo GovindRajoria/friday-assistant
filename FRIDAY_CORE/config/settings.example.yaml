@@ -41,14 +41,24 @@ vlm:
   host: http://127.0.0.1:11434
 
 screen:
-  # Continuous screen awareness (Phase 4). Disabled until the capture
-  # pipeline exists.
+  # Continuous screen awareness (Phase 4).
   enabled: false
-  interval_seconds: 15
+  # Measured on this machine: describe pass median 0.19s at 1280px, screen
+  # grab alone 28ms — cheap enough to poll fairly often. The change gate
+  # below means an idle desktop still only pays the grab+hash between real
+  # changes. The 4.86s worst case seen while benchmarking only happened
+  # when llama3.1 was busy at the same time, which vision/watcher.py avoids
+  # by skipping a cycle outright while a turn is in flight, rather than by
+  # widening this interval.
+  interval_seconds: 5
   # Perceptual-hash hamming distance; how different two frames must be before
   # a describe pass is worth paying for.
   change_threshold: 6
   monitor: 1
+  # 1280px wide. Measured the same speed as 768px and did not hallucinate;
+  # 768px did ("xtop/xcode is the name of the program running"). Do not
+  # shrink this without re-verifying output quality.
+  max_width: 1280
 
 server:
   # FastAPI + WebSocket layer (Phase 2). Bind 127.0.0.1 only.

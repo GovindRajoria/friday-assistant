@@ -33,6 +33,7 @@ import json
 import platform
 import queue
 import threading
+from contextlib import asynccontextmanager
 
 import uvicorn
 from core.config import SETTINGS
@@ -128,12 +129,45 @@ class _SpeechThread:
         self._queue.put(None)
 
 
-app = FastAPI()
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Forward-references the start/stop helpers defined further down — fine,
+    # since none of them run until uvicorn actually starts serving, well after
+    # the whole module has finished loading.
+    _start_speech()
+    await _start_screen_watcher()
+    yield
+    await _stop_screen_watcher()
+    _stop_speech()
+
+
+app = FastAPI(lifespan=_lifespan)
 
 active_skills = discover_skills()
 graph = build_graph(active_skills)
 interrupter = _Interrupter()
-_speech = _SpeechThread(SETTINGS) if SETTINGS["server"]["speak"] else None
+
+# Started by the lifespan handler, not at import. Building it here meant
+# importing this module spawned a thread that immediately tried to load
+# pyttsx3, which then died with an ImportError anywhere without audio — CI,
+# and the subprocess in tests/test_imports_without_runtime_deps.py, both of
+# which mask that package deliberately. The thread failing was harmless in
+# itself, but a module that starts a thread merely by being imported races
+# with interpreter shutdown and prints a traceback that belongs to nothing.
+_speech: "_SpeechThread | None" = None
+
+
+def _start_speech() -> None:
+    global _speech
+    if _speech is None and SETTINGS["server"]["speak"]:
+        _speech = _SpeechThread(SETTINGS)
+
+
+def _stop_speech() -> None:
+    global _speech
+    if _speech is not None:
+        _speech.stop()
+        _speech = None
 
 _connections: set[WebSocket] = set()
 _memory_buffer: list[str] = []
@@ -142,6 +176,13 @@ _busy = False  # single-flight flag; see the module docstring for why not a lock
 # a task nothing references can be garbage collected mid-run.
 _turns: set[asyncio.Task] = set()
 
+# vision.watcher.ScreenWatcher instance, created at startup only when
+# screen.enabled — stays None otherwise, which is what makes "screen.enabled:
+# false" a true no-op: nothing below imports vision at all in that case.
+_watcher = None
+_screen_events: "asyncio.Queue | None" = None
+_screen_drain_task: "asyncio.Task | None" = None
+
 
 @app.get("/health")
 async def health():
@@ -149,6 +190,56 @@ async def health():
     # must never touch the model — skills were already discovered at import
     # time, this just reports what is already loaded.
     return {"status": "ok", "skills": sorted(active_skills)}
+
+
+async def _start_screen_watcher() -> None:
+    """Start continuous screen awareness, only when the operator opted in.
+
+    mss and PIL are imported here, not at module scope — neither is
+    installed in CI (tests/test_imports_without_runtime_deps.py masks both),
+    and this module sits in the import chain that test exercises. Same
+    pattern as core.speaker inside _SpeechThread._run above: a module-scope
+    import here would make the whole server uncollectable on the runner.
+    """
+    if not SETTINGS["screen"]["enabled"]:
+        return
+
+    from vision.describers import get_describer
+    from vision.watcher import ScreenWatcher
+
+    global _watcher, _screen_events, _screen_drain_task
+    _screen_events = asyncio.Queue()
+    _screen_drain_task = asyncio.create_task(_drain_screen_events())
+
+    loop = asyncio.get_running_loop()
+    # `lambda: _busy` reads the module global at call time, not at
+    # definition time — it sees whatever _run_and_release has most recently
+    # set. That is the "is a turn running" signal the watcher needs to skip
+    # a cycle instead of contending with an in-flight turn for the same
+    # Ollama process (see vision/watcher.py's docstring for the measured
+    # cost of not doing this).
+    _watcher = ScreenWatcher(SETTINGS, get_describer(SETTINGS), is_busy=lambda: _busy)
+    _watcher.start(on_description=lambda text: loop.call_soon_threadsafe(_screen_events.put_nowait, text))
+
+
+async def _drain_screen_events() -> None:
+    """Fan the watcher's descriptions out to every connected HUD as they change.
+
+    The watcher runs on its own thread and has no socket of its own; this
+    task is the bridge, the same role _drain plays for a single turn in
+    _run_prompt below, just for the lifetime of the process instead of one
+    turn.
+    """
+    while True:
+        text = await _screen_events.get()
+        await _broadcast(events.envelope(events.SCREEN_CONTEXT, {"text": text}))
+
+
+async def _stop_screen_watcher() -> None:
+    if _watcher is not None:
+        _watcher.stop()
+    if _screen_drain_task is not None:
+        _screen_drain_task.cancel()
 
 
 async def _broadcast(event: dict) -> None:
@@ -195,10 +286,14 @@ async def _run_prompt(text: str) -> str:
 
     drain_task = asyncio.create_task(_drain())
     history_length = SETTINGS["llm"]["history_length"]
+    # "" when the watcher never started (screen.enabled: false, the
+    # default) — run_turn's screen_context parameter already defaults the
+    # same way, this just makes the no-watcher case explicit here too.
+    screen_context = _watcher.latest_description if _watcher is not None else ""
     _memory_buffer.append(f"User: {text}")
     try:
         final_answer = await asyncio.to_thread(
-            run_turn, graph, text, _memory_buffer, interrupter, emit, history_length,
+            run_turn, graph, text, _memory_buffer, interrupter, emit, history_length, screen_context,
         )
     except Exception as error:  # noqa: BLE001 — a failed turn must not close the socket
         # Anything the graph raises lands here: Ollama not running, an

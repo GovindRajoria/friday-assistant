@@ -48,9 +48,20 @@ DEFAULTS = {
     },
     "screen": {
         "enabled": False,
-        "interval_seconds": 15,
+        # Measured on this machine: describe pass median 0.19s at 1280px
+        # (0.21s at 768px — no faster, and 768px hallucinated a running
+        # program that was not running, 1280px did not), screen grab alone
+        # 28ms. Cheap enough to poll fairly often; the change gate below
+        # means an idle desktop still only pays the grab+hash between real
+        # changes. The 4.86s worst case seen while benchmarking only showed
+        # up when llama3.1 was busy at the same time, which
+        # vision/watcher.py avoids by skipping a cycle outright while a
+        # turn is in flight — that is the fix for contention, not a longer
+        # interval here.
+        "interval_seconds": 5,
         "change_threshold": 6,               # perceptual-hash hamming distance
         "monitor": 1,
+        "max_width": 1280,                   # 768px measured the same speed with worse quality; see above
     },
     "server": {
         "host": "127.0.0.1",

@@ -29,19 +29,27 @@ from core.registry import NO_ACTION
 SPOKEN_EVENT_TYPES = ("thought", "anomaly", "status", "answer")
 
 
-def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length=10) -> str:
+def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length=10, screen_context="") -> str:
     """Drive `graph` to completion for one user turn, streaming events through `emit`.
 
     Returns the final answer text. `memory_buffer` is the caller's running
     list of prior turns (`"User: ..."` / `"FRIDAY: ..."` strings); only the
     trailing `history_length` entries are folded into the prompt, mirroring
     the trim policy the caller already applies to the list itself.
+
+    `screen_context` is the watcher's latest ambient description (Phase 4),
+    defaulting to "" so callers that never set up a watcher — core/main.py's
+    console driver, every existing test — are unaffected. It is placed into
+    the initial state once per turn; core/prompts.py:build_user_message is
+    what actually folds it into the prompt, and only on the first reasoning
+    step of the turn.
     """
     state = {
         "user_input": user_input,
         "memory_buffer": "\n".join(memory_buffer[-history_length:]),
         "messages": [],
         "steps": 0,
+        "screen_context": screen_context,
     }
     final_answer = ""
 

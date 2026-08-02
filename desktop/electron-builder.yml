@@ -1,0 +1,36 @@
+# Packaging for the desktop shell.
+#
+# What ships here is the shell only. The Python backend, its 1.1 GB
+# virtualenv, the exported vision model and a 4.9 GB language model are not
+# bundled: an installer carrying all of that would be several gigabytes and
+# would go stale the moment a skill or a model changed. The installed HUD
+# finds an existing backend through FRIDAY_CORE_DIR, or beside its own
+# executable — see resolveFridayCoreDir in electron/main.ts.
+appId: dev.govindrajoria.friday
+productName: FRIDAY
+directories:
+  output: release
+  buildResources: build
+
+# out/ is what electron-vite writes: main, preload and the built renderer.
+# Nothing else from the repo belongs inside the app.
+files:
+  - out/**/*
+  - package.json
+
+win:
+  # Portable produces a single self-contained .exe with no installer and no
+  # writes outside its own directory, which suits an app that is being run
+  # next to a checkout rather than installed system-wide.
+  target:
+    - portable
+    - nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+# Unsigned. A signed build needs a certificate this project does not have,
+# and claiming otherwise in config would just fail at package time.
+forceCodeSigning: false

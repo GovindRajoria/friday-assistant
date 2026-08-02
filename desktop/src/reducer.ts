@@ -23,12 +23,18 @@ export interface HudState {
   orb: OrbState;
   connected: boolean;
   transcript: TranscriptEntry[];
+  // Latest ambient screen description (Phase 4). Kept apart from
+  // `transcript` on purpose — it replaces itself as the desktop changes
+  // rather than accumulating, so a busy screen does not fill the
+  // scrolling transcript with lines nobody asked for.
+  screenContext: string;
 }
 
 export const initialState: HudState = {
   orb: "idle",
   connected: false,
   transcript: [],
+  screenContext: "",
 };
 
 export type HudAction =
@@ -68,11 +74,11 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
     case "anomaly":
     case "error":
       return "error";
-    case "screen_context":
-      // Ambient context with no dedicated surface (out of scope for this
-      // phase) — leave whatever state the HUD was already showing alone.
-      return previous;
     default:
+      // screen_context lands here too, though in practice the reducer
+      // never calls this function for it — it is intercepted earlier in
+      // the "agent_event" case below and routed to its own field instead,
+      // specifically so it does not affect orb state.
       return previous;
   }
 }
@@ -88,6 +94,12 @@ export function reducer(state: HudState, action: HudAction): HudState {
     case "prompt_sent":
       return { ...state, orb: "thinking" };
     case "agent_event": {
+      if (action.event.type === "screen_context") {
+        // Ambient background, not a step in the turn — updates the
+        // standalone field rather than appending to the transcript, and
+        // deliberately does not touch orb (see orbForEvent's own comment).
+        return { ...state, screenContext: action.event.payload.text };
+      }
       const entry: TranscriptEntry = {
         id: action.id,
         type: action.event.type,

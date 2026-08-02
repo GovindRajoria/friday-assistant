@@ -27,13 +27,20 @@ import json
 from core.config import SETTINGS
 
 
-def build_user_message(user_prompt: str, memory_buffer: str = "") -> str:
+def build_user_message(user_prompt: str, memory_buffer: str = "", screen_context: str = "") -> str:
     """The per-turn user message: who is asking, what was just said, and the question.
 
     The profile and the recent-context block are not decoration. Replies are
     addressed to a specific operator, and without the transcript of the last
     few turns every question arrives with no history — "what about the other
     one?" has no referent.
+
+    `screen_context` is the ambient VLM description (Phase 4), folded in here
+    rather than appended to every message in the running transcript. This
+    function only runs once per turn — core/nodes/reason.py calls it only
+    when building the initial message list, never again while a turn chains
+    through further steps — so a stale mid-turn screen description cannot
+    accumulate into the model's context on every re-prompt.
     """
     profile = SETTINGS["user"]
     lines = [f"Name: {profile.get('name', 'the operator')}"]
@@ -43,11 +50,16 @@ def build_user_message(user_prompt: str, memory_buffer: str = "") -> str:
         lines.append(f"Interests: {profile['interests']}")
     lines.append("Tone: Sophisticated, sharp, and witty.")
 
-    return (
+    message = (
         "User Profile:\n" + "\n".join(lines)
         + f"\n\nRecent Context:\n{memory_buffer}"
-        + f"\n\nCurrent Question: {user_prompt}"
     )
+    if screen_context:
+        # Ambient and possibly stale by the time the model reads it — worded
+        # as a hint, not a fact to act on unprompted.
+        message += f"\n\nWhat is currently on screen (ambient, may be stale): {screen_context}"
+    message += f"\n\nCurrent Question: {user_prompt}"
+    return message
 
 
 def build_system_prompt(active_skills: dict) -> str:

@@ -26,6 +26,10 @@ ultralytics
 opencv-python
 openvino
 
+# Continuous screen awareness (Phase 4)
+mss
+pillow
+
 # Document drafting skill
 python-docx
 
