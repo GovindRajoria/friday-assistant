@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* The BrowserWindow itself is transparent (electron/main.ts); the page
+     background must stay transparent too, or Chromium paints its own
+     default white behind everything and the window-level transparency is
+     never visible. */
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}

@@ -60,3 +60,42 @@ jobs:
       - name: Tests
         working-directory: FRIDAY_CORE
         run: python -m pytest tests -q
+
+  # The desktop shell is a separate job rather than a step tacked onto the
+  # Python matrix above: different toolchain, different failure mode, and a
+  # Node install shouldn't block on or be blocked by the Python one.
+  #
+  # No electron-builder packaging and no Electron launch — a headless
+  # runner has no display, and neither step would exercise anything useful
+  # on one. tsc + vite build + vitest already cover what a runner with no
+  # GPU or window manager actually can: that the TypeScript compiles, the
+  # bundle builds, and the pure reducer behaves.
+  desktop:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # npm ci requires the lockfile to be committed — it is, deliberately,
+      # unlike node_modules/ itself (see .gitignore).
+      - name: Install
+        working-directory: desktop
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: desktop
+        run: npx tsc --noEmit -p tsconfig.json && npx tsc --noEmit -p tsconfig.node.json
+
+      - name: Build
+        working-directory: desktop
+        run: npx vite build
+
+      - name: Unit tests
+        working-directory: desktop
+        run: npx vitest run

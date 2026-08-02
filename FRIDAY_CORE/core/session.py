@@ -52,8 +52,14 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
             # testing relies on it staying set so the outer test-case
             # loop sees it and stops the whole run, not just this case.
             message = "Manual override. Thought process terminated."
-            emit("status", {"text": message})
-            return "Thought process terminated by emergency override."
+            # Emitted as `answer` rather than `status` because it is the last
+            # event of the turn. A socket client has no other way to learn a
+            # turn is over, so a non-terminal type here left the HUD waiting
+            # on an answer that was never coming — found by cancelling a real
+            # turn, not by any unit test, because the console driver reads the
+            # return value below and never noticed.
+            emit("answer", {"text": message})
+            return message
 
         for node_name, delta in update.items():
             # A node that returns {} (anomaly_guard on the common "nothing

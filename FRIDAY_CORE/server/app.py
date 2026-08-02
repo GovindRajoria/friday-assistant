@@ -45,16 +45,30 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from server import events
 
 
-class _NullInterrupter:
-    """Stands in for core.interrupt_handler.InterruptHandler.
+class _Interrupter:
+    """Settable interrupt flag consulted by core.session.run_turn.
 
-    There is no physical Delete-key interrupt over a WebSocket connection —
-    that belongs to a HUD cancel affordance in a later phase. `run_turn`
-    only ever reads `.interrupted`, so a flag that never flips is enough to
-    let it share the exact same turn-running code the console uses.
+    There is no physical Delete-key interrupt over a WebSocket connection;
+    a `{"type": "cancel"}` message is the HUD's equivalent. `run_turn` only
+    ever reads `.interrupted`, so this supplies the same read contract as
+    core.interrupt_handler.InterruptHandler plus the two operations a
+    socket needs: flipping the flag and resetting it.
+
+    Reset happens at the start of every turn, not when a turn ends —
+    run_turn deliberately leaves the flag set after an interrupted turn
+    (see its docstring), and a cancel can also arrive between turns, while
+    nothing is running at all. Either way the flag must not carry into the
+    next prompt: cancelling turn N is not a request to also kill turn N+1.
     """
 
-    interrupted = False
+    def __init__(self):
+        self.interrupted = False
+
+    def cancel(self) -> None:
+        self.interrupted = True
+
+    def reset(self) -> None:
+        self.interrupted = False
 
 
 class _SpeechThread:
@@ -110,7 +124,7 @@ app = FastAPI()
 
 active_skills = discover_skills()
 graph = build_graph(active_skills)
-interrupter = _NullInterrupter()
+interrupter = _Interrupter()
 _speech = _SpeechThread(SETTINGS) if SETTINGS["server"]["speak"] else None
 
 _connections: set[WebSocket] = set()
@@ -144,6 +158,12 @@ async def _broadcast(event: dict) -> None:
 
 async def _run_prompt(text: str) -> str:
     """Run one turn, streaming its events to every connected client as they arrive."""
+    # A cancel can arrive between turns as well as during one: run_turn
+    # leaves the flag set when it ends a turn early, and a cancel with no
+    # turn in flight simply sets it with nothing to clear it. Resetting
+    # here, at the start of this turn rather than the end of the last one,
+    # is what keeps a stray cancel from also killing the next prompt.
+    interrupter.reset()
     loop = asyncio.get_running_loop()
     queued: asyncio.Queue = asyncio.Queue()
 
@@ -223,7 +243,14 @@ async def ws_endpoint(websocket: WebSocket):
                 ))
                 continue
 
-            if message.get("type") != "prompt":
+            message_type = message.get("type")
+            if message_type == "cancel":
+                # Sets the flag; run_turn's own loop is what actually stops
+                # the turn on its next streamed update. Nothing to send
+                # back — the caller sees the turn end via a "status" event.
+                interrupter.cancel()
+                continue
+            if message_type != "prompt":
                 continue
             text = (message.get("text") or "").strip()
             if not text:
