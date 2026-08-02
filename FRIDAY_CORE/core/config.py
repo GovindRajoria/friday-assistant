@@ -52,7 +52,15 @@ DEFAULTS = {
         "change_threshold": 6,               # perceptual-hash hamming distance
         "monitor": 1,
     },
-    "server": {"host": "127.0.0.1", "port": 8756},
+    "server": {
+        "host": "127.0.0.1",
+        "port": 8756,
+        # Off switch for TTS while iterating on the server. Phase 2/3
+        # development means restarting this process constantly; a machine
+        # that speaks on every test run is exactly the kind of thing that
+        # gets disabled permanently rather than tolerated.
+        "speak": True,
+    },
     "audio": {
         # None lets speech_recognition pick the system default input device.
         "input_device_index": None,

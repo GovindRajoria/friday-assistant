@@ -73,6 +73,34 @@ It reads the manifests with `ast` rather than importing them, so it needs none o
 
 `core/interrupt_handler.py` runs a global `pynput` keyboard listener. Pressing **Delete** mid-thought sets a flag the graph driver checks on every streamed update, so a reasoning chain that has gone off the rails can be killed without terminating the process.
 
+### The local server
+
+`python -m server.app` starts a FastAPI app on `127.0.0.1:8756`. It exists so a
+desktop UI can drive the same assistant the console does; the binding is
+checked at startup and refused if it is not a loopback address.
+
+`GET /health` returns the loaded skill names and touches no model, so a client
+can poll it cheaply before rendering. `WS /ws` accepts
+`{"type": "prompt", "text": "..."}` and streams typed envelopes back —
+`thought`, `action`, `observation`, `anomaly`, `answer`, `error` — broadcast to
+every connected client.
+
+Both the console and the server drive one turn runner, `core/session.py`. The
+graph-streaming loop is written once and each caller supplies an `emit`
+callback: the console's speaks, the server's queues envelopes and speaks. A
+turn runs in a worker thread, because `graph.stream` is a synchronous generator
+and the model call blocks; events are marshalled back to the event loop.
+
+One turn runs at a time. A second prompt arriving mid-turn is rejected with an
+`error` rather than queued — the text-to-speech engine is not re-entrant and
+the interrupt flag is global, so two concurrent turns would corrupt both.
+
+Speech can be turned off with `server.speak: false` while developing against
+the socket.
+
+**Voice input is not wired into the server.** The microphone stays with the
+console entry point; the socket carries typed prompts only.
+
 ---
 
 ## Writing a skill
@@ -185,7 +213,8 @@ The core loop, vision, web search, memory, and document skills are cross-platfor
 ```
 FRIDAY_CORE/
 ├── core/
-│   ├── main.py              Entry point: skill discovery, graph construction, the narration consumer
+│   ├── main.py              Console entry point: skill discovery, graph construction, speech
+│   ├── session.py           run_turn: the graph-streaming loop, shared by console and server
 │   ├── graph.py             LangGraph state machine: reason / act / anomaly_guard / nudge / abort
 │   ├── state.py             AgentState TypedDict, the single source of loop truth
 │   ├── registry.py          Skill discovery + JSON schema derived from the manifests
@@ -199,11 +228,14 @@ FRIDAY_CORE/
 │   ├── listener.py          faster-whisper STT + wake word + typed-input fallback
 │   ├── speaker.py           pyttsx3 TTS
 │   └── interrupt_handler.py Global kill-switch listener
+├── server/
+│   ├── app.py               FastAPI: /health probe, /ws turn stream, single-flight
+│   └── events.py            Typed event envelopes sent over the socket
 ├── skills/                  Auto-discovered capabilities, grouped by domain
 ├── benchmarks/              YOLO11 / OpenVINO export and latency measurement
 ├── tools/
 │   └── check_manifests.py   Static manifest validation; what CI runs
-├── tests/                   pytest — graph routing, the anomaly guard, the step bound
+├── tests/                   pytest — graph routing, the anomaly guard, the step bound, the server
 ├── config/
 │   └── settings.example.yaml
 ├── requirements.txt
@@ -221,7 +253,9 @@ Stated plainly, because they are the honest state of the project:
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and now runs eleven pytest cases against the graph and the guard — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs seventeen pytest cases against the graph, the guard and the server — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- The server has no authentication. It is safe only because it refuses to bind to anything but a loopback address — any process on the machine can drive it, and it can launch applications and write files. Exposing the port would hand those capabilities to the network.
+- A turn cannot be cancelled over the socket. The Delete-key interrupt belongs to the console's `pynput` listener; a client that sends a prompt waits for it to finish or aborts on the step bound.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 - Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.
 
