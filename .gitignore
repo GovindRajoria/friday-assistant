@@ -24,6 +24,14 @@ FRIDAY_CORE/fleet_market_ledger.csv
 # Debug scratch output
 FRIDAY_CORE/scratch/
 
+# Desktop shell build artefacts. node_modules carries the Electron binary,
+# roughly 300 MB of platform-specific files that npm install regenerates.
+node_modules/
+desktop/dist/
+desktop/out/
+desktop/.vite/
+desktop/release/
+
 # Generated documents
 FRIDAY_Draft_*.docx
 
