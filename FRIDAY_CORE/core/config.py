@@ -31,9 +31,28 @@ DEFAULTS = {
     },
     "llm": {
         "model": "llama3.1",
-        "max_react_steps": 5,
+        "host": "http://127.0.0.1:11434",   # point at a Pi 5 / Intel box to offload
+        # Now a real bound on the whole chain, not just on re-sampling a
+        # malformed reply. 5 was sized for the latter; a proactive agent that
+        # scans, checks system state and then answers spends that before it
+        # starts, so the ceiling is raised to match what it now measures.
+        "max_react_steps": 12,
         "history_length": 10,
+        "temperature": 0.1,                  # routing wants determinism, not flair
     },
+    "vlm": {
+        "enabled": False,
+        "backend": "ollama",                 # "ollama" | "openvino"
+        "model": "moondream",
+        "host": "http://127.0.0.1:11434",    # may differ from llm.host
+    },
+    "screen": {
+        "enabled": False,
+        "interval_seconds": 15,
+        "change_threshold": 6,               # perceptual-hash hamming distance
+        "monitor": 1,
+    },
+    "server": {"host": "127.0.0.1", "port": 8756},
     "audio": {
         # None lets speech_recognition pick the system default input device.
         "input_device_index": None,

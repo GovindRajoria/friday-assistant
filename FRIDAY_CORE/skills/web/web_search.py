@@ -1,8 +1,7 @@
 # skills/web/web_search.py
-import ollama
 import requests
 from bs4 import BeautifulSoup
-from core.config import SETTINGS
+from core import llm_client
 
 
 class WebSearchSkill:
@@ -58,11 +57,9 @@ class WebSearchSkill:
             {context_chunk}
             """
             
-            ai_response = ollama.chat(model=SETTINGS["llm"]["model"], messages=[
+            summary = llm_client.chat([
                 {'role': 'user', 'content': summary_prompt}
-            ])
-            
-            summary = ai_response['message']['content'].strip()
+            ]).strip()
             return {"status": "success", "message": summary}
 
         except Exception as e:

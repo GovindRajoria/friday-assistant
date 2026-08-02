@@ -2,7 +2,7 @@
 import datetime
 import sqlite3
 
-import ollama
+from core import llm_client
 from core.config import PROJECT_ROOT, SETTINGS
 
 
@@ -78,11 +78,9 @@ class MemoryManagerSkill:
             Raw Facts: {raw_memories}
             """
             
-            response = ollama.chat(model=SETTINGS["llm"]["model"], messages=[
+            summary = llm_client.chat([
                 {'role': 'user', 'content': synthesis_prompt}
-            ])
-            
-            summary = response['message']['content'].strip()
+            ]).strip()
             return {"status": "success", "message": summary}
 
         else:

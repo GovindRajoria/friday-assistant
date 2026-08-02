@@ -1,7 +1,11 @@
 # Core runtime
 ollama
+langgraph
 PyYAML
 psutil==5.9.8
+
+# Test runner
+pytest
 
 # Web search skill
 requests

@@ -8,34 +8,73 @@ are working around.
 ## ReAct rather than function calling
 
 Ollama exposes a `tools` parameter, and Llama 3.1 supports structured tool
-calls. Using it would replace most of `core/brain.py` with a schema and a
-loop over `response.message.tool_calls`. Prompt-parsed ReAct was chosen anyway.
+calls. Using it would have replaced most of what was `core/brain.py` with a
+schema and a loop over `response.message.tool_calls`. Prompt-parsed ReAct was
+chosen instead — originally for three reasons, one of which still holds
+exactly as stated and two of which did not survive what replaced the protocol
+(see the supersession below).
 
-**The reason is the `Thought`.** ReAct makes the model's plan a first-class
-string in the transcript, before the call happens. `core/main.py` speaks it
-aloud (`self.speaker.speak(decision.get("thought"))`) so you hear *"I will scan
-the room, then check the volume, then look up the benchmark"* before anything
-executes. With native tool calling the plan is not in the output — there is a
-function name and an argument object, and the reasoning that produced them is
-gone. For an assistant whose only interface is speech, narrating intent before
-acting is not a nicety; it is the entire feedback channel.
+**The reason that still holds is the `Thought`.** ReAct makes the model's plan
+a first-class string in the transcript, before the call happens. The old
+`core/main.py` spoke it aloud before anything executed, so you would hear *"I
+will scan the room, then check the volume, then look up the benchmark"*
+before the tool fired. With native tool calling the plan is not in the
+output — there is a function name and an argument object, and the reasoning
+that produced them is gone. For an assistant whose only interface is speech,
+narrating intent before acting is not a nicety; it is the entire feedback
+channel. Nothing about that has changed: `core/nodes/reason.py` still
+produces a `thought` before `act` runs, and `core/main.py:69` still speaks
+each `narration` entry as the graph streams it.
 
-Two smaller reasons: the tool-call API shape differs between providers, whereas
-a text protocol works against anything that emits text; and a malformed
-`Action:` line is visible and debuggable in a way a rejected schema is not.
+Two smaller reasons argued for the text protocol at the time: the tool-call
+API shape differs between providers, whereas a text protocol works against
+anything that emits text; and a malformed `Action:` line is visible and
+debuggable in a way a rejected schema is not. Neither survived contact with a
+model that reworded a line and dropped a tool call silently — see the commit
+this file now documents.
 
-**What it costs:** everything below. Native tool calling would make the next two
-sections unnecessary.
+### Supersession: structured output with a required `thought`
+
+The framing above treated this as a straight choice between two options — a
+free-text protocol that keeps the thought, or native tool calling that drops
+it. There is a third option, and it is what the system runs now: ask Ollama
+for structured output (its `format` parameter, which takes an arbitrary JSON
+Schema) rather than its `tools` parameter, and put `thought` in that schema as
+a required field alongside `action`. `core/registry.py:build_action_schema`
+does exactly this — see "The structured-output schema" below for the schema
+itself and what deriving it actually took. The model still narrates, because
+the response will not validate without a non-empty `thought` string, and
+routing now reads `decision["action"]` directly instead of pattern-matching
+an `Action:` line, so a reworded response cannot silently drop a tool call.
+
+This was not the obvious next step, and it is worth saying why. The `tools`
+parameter and the `format` parameter are two different mechanisms Ollama
+exposes, not two settings on the same one: a `tools` call returns a function
+name and an argument object and nothing else, structurally incapable of
+carrying a free-text field, while a `format` call returns whatever shape the
+schema describes, including a narration field sitting next to the enum. The
+original rejection was written against `tools` specifically and was correct
+about `tools` specifically; it did not generalize to "no schema can carry a
+thought," and confusing the two would have meant living with the brittle text
+protocol indefinitely.
 
 ## Truncating at `PAUSE`
 
-The protocol asks the model to emit `Thought → Action → Action Input → PAUSE`
-and stop. Models do not reliably stop. Left alone, Llama writes its own
-`Observation: 1 person detected.` and keeps reasoning against data it invented —
-producing a confident final answer built on a webcam frame that was never
-captured.
+**Closed.** This section is kept as the record of a real problem, because the
+next thing that happened only makes sense against it. The structured-output
+schema in `core/registry.py` closes the whole class of failure below: a
+schema-constrained response has no free-text slot left to keep writing into
+after `action` and `action_input` are filled, so it cannot contain a
+fabricated `Observation:` line at all. The mechanism described here is
+deleted code (it lived in `core/brain.py`, removed with this commit).
 
-`brain.py` handles this with one line, in both `analyze_intent` and
+The old protocol asked the model to emit `Thought → Action → Action Input →
+PAUSE` and stop. Models did not reliably stop. Left alone, Llama would write
+its own `Observation: 1 person detected.` and keep reasoning against data it
+invented — producing a confident final answer built on a webcam frame that
+was never captured.
+
+`brain.py` handled this with one line, in both `analyze_intent` and
 `resume_react`:
 
 ```python
@@ -43,34 +82,133 @@ if "PAUSE" in response_text:
     response_text = response_text.split("PAUSE")[0] + "PAUSE"
 ```
 
-**Why truncation rather than validation.** A parser that detected a fabricated
-`Observation:` and rejected the response would have to do something with it:
-retry, or fail. Retrying costs a full generation and often produces the same
-hallucination, because the prompt that caused it has not changed. Truncation
-costs nothing and cannot fail — the fabricated text is physically removed before
-anything reads it, so there is no bad state to recover from.
+**Why truncation rather than validation, at the time.** A parser that detected
+a fabricated `Observation:` and rejected the response would have had to do
+something with it: retry, or fail. Retrying costs a full generation and often
+produces the same hallucination, because the prompt that caused it has not
+changed. Truncation cost nothing and could not fail — the fabricated text was
+physically removed before anything read it, so there was no bad state to
+recover from.
 
-It also survives partial compliance. A model that emits a correct action *and
-then* invents an observation is doing the right thing and the wrong thing in one
-response; truncation keeps the first and discards the second, where rejection
-would throw both away.
+It also survived partial compliance. A model that emitted a correct action
+*and then* invented an observation was doing the right thing and the wrong
+thing in one response; truncation kept the first and discarded the second,
+where rejection would have thrown both away.
 
-**What it does not catch:** a model that never emits `PAUSE` at all. That
-response falls through to the `Action:`/`Final Answer:` checks, and if it matches
-neither, the loop asks again until `max_react_steps` is exhausted.
+**What it never caught:** a model that never emitted `PAUSE` at all. That
+response fell through to the `Action:`/`Final Answer:` checks, and if it
+matched neither, the loop asked again — which is the failure mode the next
+section was written about, and had overclaimed about its own fix.
 
-## `max_react_steps` is a hard bound, not a retry budget
+## The structured-output schema
 
-`analyze_intent` loops at most `max_react_steps` times and then returns *"I got
-stuck thinking about that and had to abort the process."* This is deliberately a
-plain answer rather than an error: the failure surface is a voice, and a
-traceback read aloud helps nobody.
+`core/registry.py:build_action_schema` derives a JSON Schema from the loaded
+skill manifests: `action` is an enum of every loaded skill's name plus the
+sentinel `"none"`, and all four fields — `thought`, `action`, `action_input`,
+`final_answer` — are required. Three things about that shape were not
+predictable from the design on paper. All three were found by running the
+real model against real schema variants on this machine, not by reasoning
+about the schema in the abstract.
+
+**1. Making `action` optional did not work.** The first schema tried left
+`action` out of `required`, on the reasoning that a model choosing not to act
+should be free to omit it. Feeding that schema to llama3.1 produced a
+`thought` and nothing else — the model narrated a plan and selected no
+action, on the first live call. A field that is legal to omit gets omitted;
+requiring `action` and giving it an explicit `"none"` value in the enum is
+what turns "decline to act" into a choice the model has to make rather than a
+field it can leave blank.
+
+**2. Requiring `final_answer` means the model fills it even when an action is
+pending.** With all four fields required, llama3.1 returned a schema-valid
+response that both called a tool and answered the question in the same
+breath:
+
+```json
+{"thought": "...", "action": "scan_environment", "action_input": {},
+ "final_answer": "I can see the following: [list of environment details]"}
+```
+
+`final_answer` there is a placeholder, written before the scan had run,
+because the schema does not let the field stay empty. `core/graph.py`'s
+`route_after_reason` tests `action` before `final_answer` for exactly this
+reason — reading `final_answer` first would speak that placeholder and never
+call the tool — and `core/nodes/reason.py`'s `reason_node` discards the field
+at the source, setting `final_answer` to `""` whenever `action != "none"`
+rather than passing through whatever the model wrote. The two are
+belt-and-braces on the same observed failure: one keeps the placeholder out
+of state, the other keeps it from being routed on if it gets in anyway.
+`tests/test_placeholder_answer.py` is the regression test for this exact
+payload.
+
+**3. The prompt has to name the `"none"` sentinel.** The old text protocol
+ended a turn with `Final Answer:`, which doubled as the model's cue that it
+was allowed to stop. Dropping that line and requiring `action` left nothing
+describing how to decline: the schema forces a value, and with no instruction
+telling the model that `"none"` was a legal, ordinary answer, it selected a
+tool on every single turn. Five consecutive live runs — one of them told
+explicitly not to use a tool — ran to the step bound and aborted before this
+was diagnosed. The fix was a prompt rule, not a schema or code change; it now
+reads, in `core/prompts.py`:
+
+> TERMINATION: When you have enough information to answer, set `action` to
+> `"none"` and put your complete reply in `final_answer`. `"none"` is the
+> correct choice for any request that needs no tool — a greeting, a question
+> you can already answer, or a chain that has finished.
+
+An enum constrains what the model can select; it does not tell the model
+which value means "stop," and that turned out not to be discoverable from the
+schema alone. This is the same category of fact "Protocols hardcoded in the
+system prompt" (below) has always made about the rest of the prompt — it took
+a schema migration to produce a new instance of it.
+
+## `max_react_steps` bounds the whole chain — it did not always
+
+**This section previously overclaimed, and it is worth correcting plainly.**
+It used to read as though `max_react_steps` bounded the reasoning loop end to
+end. It did not. `analyze_intent` in the old `core/brain.py` looped at most
+`max_react_steps` times, but only across its own malformed-output resample —
+retries of a single decision, not steps of a chain. The chaining path,
+`resume_react` called repeatedly from the `while` loop in `core/main.py`, had
+no counter of its own and exited only on a `final_answer`, an `unknown`
+route, or a Delete keypress. A model that kept emitting well-formed actions
+would chain forever; nothing but an interrupt or a final answer stopped it.
+README:23 and README:49 both stated a bound that did not exist on that path —
+corrected there along with this file.
+
+It is a real bound now. `core/state.py`'s `steps` field increments once per
+pass through `reason_node`, and `core/graph.py`'s `route_after_reason` checks
+it against `SETTINGS["llm"]["max_react_steps"]` before allowing another
+`act`; past the limit it routes to `abort_node`, which returns a plain
+sentence — *"I worked through several steps without reaching a conclusion, so
+I stopped."* — rather than a traceback. That choice survives from the
+original design intent even though the mechanism did not: the failure
+surface is a voice, and a stack trace read aloud helps nobody.
+(`core/main.py` has its own fallback for the case where the graph ends with
+no `final_answer` at all — *"I worked through that but have no answer to
+give."* — a distinct message for a distinct condition.)
+
+The number changed too, 5 to 12. 5 was sized as a resample budget for a single
+malformed reply, never as a chain length, and a proactive agent that scans
+the room and checks system state before answering spends several steps on
+state awareness alone before it does anything else. There is a second,
+coarser ceiling underneath the step counter: `core/main.py` calls
+`graph.stream(state, {"recursion_limit": 40})`, LangGraph's own guard against
+unbounded node transitions. It is not sized to a precise multiple of
+`max_react_steps` — a scan turn costs three graph steps (`reason`, `act`,
+`anomaly_guard`) against one increment of `steps` — so the two bounds are not
+guaranteed to trip in a fixed order in every scenario; `max_react_steps` is
+the one meant to govern ordinary operation, and `recursion_limit` is the
+backstop under it.
 
 ## Skill discovery by walking the filesystem
 
-`core/main.py` does `skills_dir.rglob("*.py")`, imports each module, calls
-`setup()`, and registers whatever comes back under `manifest["name"]`. There is
-no registry file, no entry-point group, no decorator.
+`core/registry.py:discover_skills` does `skills_dir.rglob("*.py")`, imports
+each module, calls `setup()`, and registers whatever comes back under
+`manifest["name"]`. This lived in `core/main.py` before the graph migration
+and moved out verbatim — same `rglob` + `importlib` + `setup()` contract, same
+behavior, a different file. There is no registry file in the sense of a
+hand-maintained list, no entry-point group, no decorator.
 
 The gain is real: adding a capability is dropping a file in `skills/`. Nothing
 else in the repository has to be edited, which means a skill can be written,
@@ -79,7 +217,7 @@ tried, and deleted without leaving a trace in version control.
 **The cost is a silent failure mode**, and it is worth stating precisely:
 
 ```python
-self.active_skills[skill_name] = skill_instance
+active_skills[skill_name] = skill_instance
 ```
 
 That is a dict assignment. Two skills declaring `"name": "system_check"` do not
@@ -127,20 +265,40 @@ cannot open quietly.
 
 ## Protocols hardcoded in the system prompt
 
-`brain.py` embeds behavioural rules directly in the prompt string — the anomaly
-rule that mutes audio when a scan sees more than one person *or* fails to see
-the laptop, and holds the mute until exactly one person is confirmed again; the
-R&D chain that sequences search → analyse → draft → log; the instruction to do
-arithmetic internally rather than reaching for a tool.
+The old `brain.py` embedded behavioural rules directly in the prompt string,
+and `core/prompts.py` still does — minus one of them. The anomaly rule (mute
+audio when a scan sees more than one person *or* fails to see the laptop, and
+hold the mute until a scan reports exactly one person *and* the laptop
+together again) used to be a sentence in that string with no enforcement
+behind it at all. It is not prompt text anymore: `core/nodes/anomaly_guard.py`
+runs the same rule in Python after every scan whether or not the model
+cooperates, and its two halves are two functions, `_is_anomalous` and
+`_is_clear`, each testable with a dict of counts and no model in the loop.
 
-These are configuration living in code, and it is fair to call that a smell. The
-argument for it: they are **prompt engineering, not settings**. Each one was
-added in response to an observed failure — the model calling a nonexistent
-`calculator` tool, or using `core_identity` as a filler action — and each is
-phrased the way it is because other phrasings did not work. Moving them into
-`settings.yaml` would invite editing by someone who has not seen the failure the
-wording is defending against, and would present prose whose exact form matters as
-though it were a tunable.
+What is still true, and argued the same way as before: the R&D chain that
+sequences search → analyse → draft → log, and the instruction to do
+arithmetic internally rather than reaching for a tool, both remain in
+`build_system_prompt`. These are configuration living in code, and it is fair
+to call that a smell. The argument for it: they are **prompt engineering, not
+settings**. Each one was added in response to an observed failure — the model
+calling a nonexistent `calculator` tool, or using `core_identity` as a filler
+action — and each is phrased the way it is because other phrasings did not
+work. Moving them into `settings.yaml` would invite editing by someone who has
+not seen the failure the wording is defending against, and would present prose
+whose exact form matters as though it were a tunable.
+
+The graph migration produced a fresh instance of this same argument rather
+than making it obsolete. Dropping the old `Final Answer:` exit condition left
+nothing describing how to stop; with `action` now a required schema field,
+that omission meant the model picked a tool on every turn and every request
+ran to the step bound — five consecutive live runs, one of them told
+explicitly not to use a tool. The fix was not a schema change; it was one
+prompt line (`OPERATING RULES: 1. TERMINATION`, in `core/prompts.py`) naming
+the `"none"` sentinel explicitly, because a value the model must select from
+an enum is not discoverable from the enum alone. See "The structured-output
+schema" above for the full account — it belongs in both places, because it is
+simultaneously a fact about the schema and a fresh example of a prompt
+sentence that exists only because a specific failure demanded it.
 
 The same reasoning explains the negative instructions in the shipped manifests
 ("DO NOT use this to open applications"). The `description` field is the routing
@@ -150,14 +308,25 @@ written to steer, not to document.
 ## What CI verifies
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
-and `tools`, and `tools/check_manifests.py` on Python 3.10 and 3.12.
+and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
+`pytest` against `FRIDAY_CORE/tests/` — eleven tests covering graph routing,
+the anomaly guard, the step bound, and a regression test for the
+placeholder-answer failure described above, all run against fake skills and a
+mocked `llm_client.chat`, no model required.
 
-`requirements.txt` is deliberately not installed. It pulls `ultralytics`,
-`torch`, `faster-whisper`, `pyttsx3` and `pynput` — gigabytes of wheels, several
-of which want audio and camera devices a runner does not have. Installing them
-would buy a much slower job that still could not exercise the runtime.
+`requirements.txt` is still deliberately not installed in full. It pulls
+`ultralytics`, `torch`, `faster-whisper`, `pyttsx3` and `pynput` — gigabytes of
+wheels, several of which want audio and camera devices a runner does not have.
+Installing them would buy a much slower job that still could not exercise the
+runtime. `langgraph` and `pytest` are the exception, installed directly in
+`ci.yml` rather than through the requirements file: the reasoning graph is
+pure Python over those two packages, `core/llm_client.py` imports `ollama`
+lazily inside `get_client` specifically so the graph stays importable without
+it, and the tests mock `chat` rather than calling a model — so this stays a
+seconds-long job with no GPU, camera, or running Ollama instance involved.
 
-**What it does not verify:** the reasoning loop, speech recognition, synthesis,
-and every skill's `execute()`. All of those need a model, a microphone, or a
-camera, and none is exercised by anything but hand-testing and the batch runner
-in `test_suite.txt`. That is the honest state of it.
+**What it does not verify:** the reasoning loop against a real model, speech
+recognition, synthesis, and every skill's `execute()`. All of those need a
+model, a microphone, or a camera, and none is exercised by anything but
+hand-testing and the batch runner in `test_suite.txt`. That is the honest
+state of it.

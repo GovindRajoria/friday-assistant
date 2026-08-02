@@ -77,7 +77,7 @@ class ScanEnvironmentSkill:
             items_text = item_strings[0]
 
         observation = f"I am currently looking through the optical sensor. I can see {items_text} in my field of view."
-        return {"status": "success", "message": observation}
+        return {"status": "success", "message": observation, "data": {"detections": dict(counts)}}
 
 
 def setup():

@@ -4,7 +4,7 @@
 
 A voice-driven desktop assistant that runs entirely on local hardware. Speech recognition, reasoning, and text-to-speech all execute on-device — there is no cloud API in the loop, and no audio or camera data leaves the machine.
 
-The interesting part is not the voice interface; it is the reasoning loop. FRIDAY implements **ReAct** (Reason + Act) on top of a local Llama 3.1 via Ollama, so it can chain several tools together to answer one request — search the web, do arithmetic internally, write the result to a document, then commit a note to long-term memory — deciding each step from the outcome of the last one.
+The interesting part is not the voice interface; it is the reasoning loop. FRIDAY runs a **LangGraph state machine** on top of a local Llama 3.1 via Ollama: every decision is structured output against a JSON schema, not parsed free text, so it can chain several tools together to answer one request — search the web, do arithmetic internally, write the result to a document, then commit a note to long-term memory — deciding each step from the outcome of the last one, with a real bound on how long a chain can run.
 
 Built May 2026.
 
@@ -17,23 +17,29 @@ flowchart LR
   mic(["microphone"]) --> stt["faster-whisper<br/>wake word + STT"]
   kbd(["keypress"]) --> typed["typed input"]
 
-  stt --> brain
-  typed --> brain
+  stt --> reason
+  typed --> reason
 
-  subgraph loop["ReAct loop — bounded by max_react_steps"]
-    brain["FridayBrain<br/>Ollama · Llama 3.1"]
-    trunc["truncate at PAUSE<br/>discards fabricated Observations"]
-    parse{"Final Answer<br/>or Action?"}
-    exec["skill.execute(params)"]
+  subgraph graph["core/graph.py — LangGraph state machine"]
+    reason["reason<br/>structured output → thought/action"]
+    act["act<br/>skill.execute(params)"]
+    guard["anomaly_guard<br/>deterministic mute rule"]
+    nudge["nudge<br/>action and answer both empty"]
+    abort["abort<br/>steps past max_react_steps"]
 
-    brain --> trunc --> parse
-    parse -->|"Action + Action Input"| exec
-    exec -->|"Observation:"| brain
+    reason -->|"action set, under step bound"| act
+    reason -->|"action = none, no answer"| nudge
+    reason -->|"step bound reached"| abort
+    act -->|"action = scan_environment"| guard
+    act -->|"otherwise"| reason
+    guard --> reason
+    nudge --> reason
   end
 
-  kill(["Delete key"]) -.->|"interrupt flag,<br/>checked each iteration"| loop
+  reason -->|"action = none, final_answer set"| tts["pyttsx3"] --> spk(["speaker"])
+  abort -.->|"spoken apology, no traceback"| tts
 
-  parse -->|"Final Answer:"| tts["pyttsx3"] --> spk(["speaker"])
+  kill(["Delete key"]) -.->|"interrupt flag,<br/>checked each iteration"| graph
 ```
 
 Everything in that diagram runs on the machine it is installed on. No audio,
@@ -41,16 +47,19 @@ frame, or transcript is sent anywhere.
 
 ### The reasoning loop
 
-`core/brain.py` builds a system prompt containing a JSON manifest of every loaded skill — name, description, required parameters — then asks the model to emit a strict `Thought → Action → Action Input → PAUSE` sequence. `analyze_intent()` parses that response and hands the chosen tool and its parameters back to `core/main.py`, which executes the skill and feeds the result to `resume_react()` as an `Observation`. The model then either calls another tool or emits `Final Answer:` and the loop exits.
+`core/registry.py:build_action_schema` derives a JSON Schema from every loaded skill's manifest — `action` is an enum of the loaded skill names plus the sentinel `"none"`, and `thought`, `action`, `action_input`, and `final_answer` are all required. `core/nodes/reason.py` sends that schema to Ollama as the `format` parameter and gets back structured JSON instead of free text, so `core/graph.py`'s `route_after_reason` reads `decision["action"]` directly rather than pattern-matching an `Action:` line. `core/nodes/act.py` executes the chosen skill and the result becomes the next `Observation` in the transcript; the graph loops back to `reason` (through `anomaly_guard` first, if the tool was `scan_environment`) until the model sets `action` to `"none"` and gives its answer in `final_answer`.
 
-Two details that took iteration to get right:
+Three details that took live runs against the model to get right — see [docs/DESIGN.md](docs/DESIGN.md) for the full account:
 
-- **Hallucinated observations.** Left alone, the model happily writes its own `Observation:` line and continues reasoning against invented data. The fix is truncating every response at the `PAUSE` token (`brain.py`), which physically discards anything the model tried to fabricate past the point where it was supposed to yield control.
-- **Runaway loops.** `max_react_steps` bounds the reasoning cycle, so a model that never reaches a conclusion aborts with an explanation instead of spinning.
+- **`action` has to be required, not optional.** Leaving it out of the schema's `required` list let the model return a thought and no action at all — it narrated a plan and selected nothing. Requiring every field, with `"none"` as an explicit enum value, is what forces a commitment.
+- **A pending action can arrive with a placeholder answer.** Because `final_answer` is also required, the model sometimes fills it even while calling a tool — observed directly as `"I can see the following: [list of environment details]"` returned alongside a correct `scan_environment` call. Routing checks `action` before `final_answer`, and `reason_node` discards the answer unless the model declined to act.
+- **Runaway loops are bounded for the first time.** `steps` increments once per pass through `reason`, and past `max_react_steps` (12) the graph routes to `abort` and returns a plain spoken sentence instead of continuing or crashing. The prompt also has to name the `"none"` sentinel explicitly — without it, five consecutive live runs picked a tool on every turn and ran to the bound regardless of what was asked.
+
+`core/llm_client.py` is the single point of contact with Ollama; every skill and node that talks to the model goes through it, and `llm.host` in settings is what would point inference at another machine.
 
 ### Skill discovery
 
-`core/main.py` walks `skills/` with `rglob("*.py")`, imports each module, and calls its `setup()`. Whatever comes back is registered under its `manifest["name"]`. Adding a capability means dropping a file into `skills/` — no registry to edit, no imports to wire up.
+`core/registry.py:discover_skills` walks `skills/` with `rglob("*.py")`, imports each module, and calls its `setup()`. Whatever comes back is registered under its `manifest["name"]`. Adding a capability means dropping a file into `skills/` — no registry to edit, no imports to wire up.
 
 The registry is keyed by manifest name, so **two skills declaring the same name silently overwrite each other**. Keep names unique — `tools/check_manifests.py` enforces it, and CI runs it on every push:
 
@@ -62,7 +71,7 @@ It reads the manifests with `ast` rather than importing them, so it needs none o
 
 ### Interrupts
 
-`core/interrupt_handler.py` runs a global `pynput` keyboard listener. Pressing **Delete** mid-thought sets a flag the ReAct loop checks on every iteration, so a reasoning chain that has gone off the rails can be killed without terminating the process.
+`core/interrupt_handler.py` runs a global `pynput` keyboard listener. Pressing **Delete** mid-thought sets a flag the graph driver checks on every streamed update, so a reasoning chain that has gone off the rails can be killed without terminating the process.
 
 ---
 
@@ -176,8 +185,16 @@ The core loop, vision, web search, memory, and document skills are cross-platfor
 ```
 FRIDAY_CORE/
 ├── core/
-│   ├── main.py              Entry point: skill discovery, the ReAct ping-pong loop
-│   ├── brain.py             Ollama client, prompt construction, response parsing
+│   ├── main.py              Entry point: skill discovery, graph construction, the narration consumer
+│   ├── graph.py             LangGraph state machine: reason / act / anomaly_guard / nudge / abort
+│   ├── state.py             AgentState TypedDict, the single source of loop truth
+│   ├── registry.py          Skill discovery + JSON schema derived from the manifests
+│   ├── prompts.py           System prompt and per-turn user message construction
+│   ├── llm_client.py        The single Ollama client; every call in the project goes through it
+│   ├── nodes/
+│   │   ├── reason.py        Structured-output call → thought / action / final_answer
+│   │   ├── act.py           Skill dispatch + observation capture
+│   │   └── anomaly_guard.py Deterministic mute rule, enforced after every scan
 │   ├── config.py            Settings loader with layered fallbacks
 │   ├── listener.py          faster-whisper STT + wake word + typed-input fallback
 │   ├── speaker.py           pyttsx3 TTS
@@ -186,6 +203,7 @@ FRIDAY_CORE/
 ├── benchmarks/              YOLO11 / OpenVINO export and latency measurement
 ├── tools/
 │   └── check_manifests.py   Static manifest validation; what CI runs
+├── tests/                   pytest — graph routing, the anomaly guard, the step bound
 ├── config/
 │   └── settings.example.yaml
 ├── requirements.txt
@@ -200,11 +218,12 @@ Design decisions and the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md)
 
 Stated plainly, because they are the honest state of the project:
 
-- Prompt-based tool routing is brittle. The model occasionally appends prose to an `Action:` line or invents a tool that does not exist; the guardrails in `brain.py` catch the common failure modes but not all of them.
+- The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, and validates every skill manifest — real gates, but static ones. The reasoning loop, speech recognition, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and now runs eleven pytest cases against the graph and the guard — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
+- Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.
 
 ---
 

@@ -1,8 +1,7 @@
 # skills/os_control/draft_document.py
 from pathlib import Path
 
-import ollama
-from core.config import SETTINGS
+from core import llm_client
 from docx import Document
 from docx.shared import Pt
 
@@ -30,11 +29,12 @@ class DraftDocumentSkill:
             Do not include any conversational filler. Just output the content of the document.
             """
             
-            response = ollama.chat(model=SETTINGS["llm"]["model"], messages=[
+            # The shared client defaults to the low temperature the router wants;
+            # prose written at 0.1 reads flat and repetitive, so this call opts
+            # out of it explicitly.
+            content = llm_client.chat([
                 {'role': 'user', 'content': prompt}
-            ])
-            
-            content = response['message']['content'].strip()
+            ], temperature=0.8).strip()
             
             # 2. Create the Word Document
             print("[*] Formatting and saving the document...")
