@@ -9,6 +9,7 @@ spins up a real pyttsx3 engine during a test run.
 import ipaddress
 import json
 import threading
+import time
 
 import pytest
 from core.config import SETTINGS
@@ -40,14 +41,16 @@ def _decision(action="none", thought="", final_answer="", action_input=None):
 
 @pytest.fixture(autouse=True)
 def _reset_server_state():
-    """Module-level state (busy flag, memory, connections) must not leak between tests."""
+    """Module-level state (busy flag, memory, connections, interrupt flag) must not leak between tests."""
     server_app._memory_buffer.clear()
     server_app._busy = False
     server_app._connections.clear()
+    server_app.interrupter.reset()
     yield
     server_app._memory_buffer.clear()
     server_app._busy = False
     server_app._connections.clear()
+    server_app.interrupter.reset()
 
 
 def test_health_returns_ok_and_skills():
@@ -174,3 +177,63 @@ def test_second_prompt_on_the_same_connection_is_also_rejected(monkeypatch):
 
         release.set()
         assert websocket.receive_json()["type"] == "answer"
+
+
+def test_cancel_message_ends_a_turn_in_flight(monkeypatch):
+    monkeypatch.setattr(server_app, "graph", build_graph({}))
+
+    def _slow_chat(*args, **kwargs):
+        # Blocks on the flag itself rather than an event the test sets
+        # independently. Waiting on a plain threading.Event that the test
+        # thread flips right after sending the cancel message only makes
+        # the cancel *likely* to have been processed first, not certain —
+        # the receive loop and this worker thread are scheduled
+        # independently. Polling the flag makes the ordering causal: this
+        # can only return once interrupter.cancel() has actually run.
+        for _ in range(200):  # 2s budget at 10ms/poll
+            if server_app.interrupter.interrupted:
+                break
+            time.sleep(0.01)
+        return _decision(action="none", thought="thinking", final_answer="done")
+
+    monkeypatch.setattr("core.llm_client.chat", _slow_chat)
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "prompt", "text": "first"}))
+        ws.send_text(json.dumps({"type": "cancel"}))
+
+        event = json.loads(ws.receive_text())
+
+        # run_turn checks interrupter.interrupted before it processes the
+        # first streamed update, so the turn ends there — no "thought" or
+        # "answer" ever reaches the socket, only the override status.
+        assert event["type"] == "status"
+        assert "override" in event["payload"]["text"].lower()
+
+    # A cancelled turn still has to release single-flight, or the server is
+    # wedged for the rest of the session.
+    assert server_app._busy is False
+
+
+def test_cancel_between_turns_does_not_poison_the_next_prompt(monkeypatch):
+    # Regression for the bug this feature is worth testing for: run_turn
+    # leaves interrupter.interrupted set after an interrupted turn, and a
+    # cancel with nothing running just sets it directly either way. Without
+    # a reset at the start of the next turn, that stray flag would end the
+    # very next prompt before it produced anything.
+    monkeypatch.setattr(server_app, "graph", build_graph({}))
+    monkeypatch.setattr(
+        "core.llm_client.chat",
+        lambda *a, **k: _decision(action="none", thought="", final_answer="done"),
+    )
+
+    client = TestClient(app)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "cancel"}))
+        ws.send_text(json.dumps({"type": "prompt", "text": "hello"}))
+
+        event = json.loads(ws.receive_text())
+
+    assert event["type"] == "answer"
+    assert event["payload"]["text"] == "done"

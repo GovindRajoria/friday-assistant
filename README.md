@@ -83,7 +83,9 @@ checked at startup and refused if it is not a loopback address.
 can poll it cheaply before rendering. `WS /ws` accepts
 `{"type": "prompt", "text": "..."}` and streams typed envelopes back —
 `thought`, `action`, `observation`, `anomaly`, `answer`, `error` — broadcast to
-every connected client.
+every connected client. It also accepts `{"type": "cancel"}`, which stops the
+turn currently in flight; the flag it sets is reset at the start of the next
+turn, so a cancel with no turn running does not affect the next prompt.
 
 Both the console and the server drive one turn runner, `core/session.py`. The
 graph-streaming loop is written once and each caller supplies an `emit`
