@@ -85,6 +85,16 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
             # tool calls and observations distinctly from spoken narration.
             if node_name == "act":
                 emit("observation", {"text": delta.get("observation", "")})
+            elif node_name == "confirm":
+                # Approved: stay silent here. `act` runs next and emits its
+                # own observation for the real result; emitting anything
+                # from this node too would say "nothing happened yet" right
+                # before the actual outcome. Denied: the denial itself IS
+                # the observation for this step, exactly like a normal tool
+                # failure, so it reaches both the model's next prompt and
+                # (via the same "observation" event type) anyone watching.
+                if not delta.get("action_approved", False):
+                    emit("observation", {"text": delta.get("observation", "")})
             elif node_name == "anomaly_guard":
                 for line in delta.get("narration", []):
                     emit("anomaly", {"text": line})

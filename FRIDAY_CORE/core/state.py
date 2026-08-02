@@ -23,3 +23,4 @@ class AgentState(TypedDict, total=False):
     detections: dict[str, int]     # structured output of the last scan
     anomaly_active: bool           # latched by the guard, cleared only by "exactly 1 person"
     screen_context: str            # ambient VLM description (Phase 4)
+    action_approved: bool          # set by core/nodes/confirm.py; read by route_after_confirm (Phase 6)

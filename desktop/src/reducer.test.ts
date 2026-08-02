@@ -8,7 +8,13 @@ function agentEvent(event: AgentEvent, id = "id-1") {
 
 describe("reducer", () => {
   it("starts idle and disconnected", () => {
-    expect(initialState).toEqual({ orb: "idle", connected: false, transcript: [], screenContext: "" });
+    expect(initialState).toEqual({
+      orb: "idle",
+      connected: false,
+      transcript: [],
+      screenContext: "",
+      pendingConfirmation: null,
+    });
   });
 
   it("marks connected on a connected action", () => {
@@ -95,6 +101,12 @@ describe("reducer", () => {
   it("does not mutate the previous state object", () => {
     const before = initialState;
     agentEvent({ type: "thought", payload: { text: "x" } });
-    expect(before).toEqual({ orb: "idle", connected: false, transcript: [], screenContext: "" });
+    expect(before).toEqual({
+      orb: "idle",
+      connected: false,
+      transcript: [],
+      screenContext: "",
+      pendingConfirmation: null,
+    });
   });
 });

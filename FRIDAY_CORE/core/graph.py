@@ -19,27 +19,43 @@ Nodes never speak. They append to `narration`, and exactly one consumer reads
 it — the console driver in Phase 1, the event fanout in Phase 2. Letting nodes
 call the speaker directly would mean every line is spoken twice the moment the
 WebSocket layer lands.
+
+Phase 6 adds one more node, `confirm`, between `reason` and `act`. A skill
+whose manifest sets `"destructive": True` routes through it instead of going
+straight to `act`; everything else is unaffected — `route_after_reason` only
+looks up `destructive` for the action actually chosen, so a turn that never
+selects a destructive skill never touches this node at all.
 """
 from langgraph.graph import END, StateGraph
 
 from core.config import SETTINGS
 from core.nodes.act import act_node
 from core.nodes.anomaly_guard import anomaly_guard_node
+from core.nodes.confirm import confirm_node
 from core.nodes.reason import reason_node
 from core.registry import NO_ACTION
 from core.state import AgentState
 
 
-def route_after_reason(state: AgentState) -> str:
+def route_after_reason(state: AgentState, active_skills: dict | None = None) -> str:
     # `action` is tested BEFORE `final_answer`, and that order is not arbitrary.
     # The schema requires final_answer, so the model fills it even when an
     # action is pending — observed in practice as a placeholder answer
     # ("I can see the following: [list of environment details]") returned
     # alongside a correct scan_environment call. Reading final_answer first
     # would speak the placeholder and never run the tool.
+    #
+    # `active_skills` defaults to None/{} so existing single-argument callers
+    # (tests/test_placeholder_answer.py calls this directly) keep working: an
+    # unknown or absent skill is simply never treated as destructive here,
+    # matching build_graph's own default-deny stance one layer up.
+    active_skills = active_skills or {}
     if state.get("action") and state["action"] != NO_ACTION:
         if state.get("steps", 0) >= SETTINGS["llm"]["max_react_steps"]:
             return "abort"
+        skill = active_skills.get(state["action"])
+        if skill is not None and skill.manifest.get("destructive"):
+            return "confirm"
         return "act"
     if state.get("final_answer"):
         return END
@@ -48,6 +64,13 @@ def route_after_reason(state: AgentState) -> str:
     # Declined to act and gave no answer. Rare now that all fields are
     # required, but still legal — nudge, and let the step bound catch a loop.
     return "nudge"
+
+
+def route_after_confirm(state: AgentState) -> str:
+    # confirm_node sets this explicitly on both the approved and denied
+    # paths, so a missing key (which .get would treat the same as False)
+    # would only ever come from a bug in that node, not a legitimate state.
+    return "act" if state.get("action_approved") else "reason"
 
 
 def route_after_act(state: AgentState) -> str:
@@ -77,17 +100,31 @@ def abort_node(state: AgentState) -> dict:
     return {"final_answer": "I worked through several steps without reaching a conclusion, so I stopped."}
 
 
-def build_graph(active_skills: dict):
+def build_graph(active_skills: dict, confirm=None):
+    """Compile the graph. `confirm` is injected exactly like `emit` elsewhere
+    in this project: the node that needs it (confirm_node) takes it as a
+    plain argument rather than reaching for a global, so a caller that wires
+    nothing gets the safe default rather than a NameError or a silent bypass.
+
+    `confirm(action: str, action_input: dict, thought: str) -> bool` is
+    called synchronously from whichever thread is running the turn. Leaving
+    it `None` — the default — means every destructive action is denied; see
+    core/nodes/confirm.py for why that has to be the default rather than an
+    opt-in.
+    """
     graph = StateGraph(AgentState)
     graph.add_node("reason", lambda s: reason_node(s, active_skills))
+    graph.add_node("confirm", lambda s: confirm_node(s, confirm))
     graph.add_node("act", lambda s: act_node(s, active_skills))
     graph.add_node("anomaly_guard", lambda s: anomaly_guard_node(s, active_skills))
     graph.add_node("nudge", nudge_node)
     graph.add_node("abort", abort_node)
 
     graph.set_entry_point("reason")
-    graph.add_conditional_edges("reason", route_after_reason,
-                                {"act": "act", "nudge": "nudge", "abort": "abort", END: END})
+    graph.add_conditional_edges("reason", lambda s: route_after_reason(s, active_skills),
+                                {"act": "act", "confirm": "confirm", "nudge": "nudge",
+                                 "abort": "abort", END: END})
+    graph.add_conditional_edges("confirm", route_after_confirm, {"act": "act", "reason": "reason"})
     graph.add_conditional_edges("act", route_after_act,
                                 {"anomaly_guard": "anomaly_guard", "reason": "reason"})
     graph.add_edge("anomaly_guard", "reason")

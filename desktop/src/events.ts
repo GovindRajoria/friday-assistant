@@ -16,7 +16,8 @@ export type AgentEventType =
   | "anomaly"
   | "error"
   | "status"
-  | "screen_context";
+  | "screen_context"
+  | "confirmation_required";
 
 export interface TextPayload {
   text: string;
@@ -31,6 +32,10 @@ export interface ActionPayload {
 // nothing on the wire emits it today (server/events.py's own docstring says
 // so). It is in the union because the drift gate requires this file to
 // match ALL_TYPES exactly, not because anything here renders it.
+//
+// confirmation_required (Phase 6) reuses ActionPayload rather than
+// TextPayload — the HUD needs the actual proposed {name, input} to show a
+// human before a destructive skill runs, not just a sentence about it.
 export type AgentEvent =
   | { type: "thought"; payload: TextPayload }
   | { type: "action"; payload: ActionPayload }
@@ -39,7 +44,8 @@ export type AgentEvent =
   | { type: "anomaly"; payload: TextPayload }
   | { type: "error"; payload: TextPayload }
   | { type: "status"; payload: TextPayload }
-  | { type: "screen_context"; payload: TextPayload };
+  | { type: "screen_context"; payload: TextPayload }
+  | { type: "confirmation_required"; payload: ActionPayload };
 
 export function isAgentEvent(value: unknown): value is AgentEvent {
   if (typeof value !== "object" || value === null) return false;
