@@ -219,6 +219,25 @@ def test_cancel_message_ends_a_turn_in_flight(monkeypatch):
     assert server_app._busy is False
 
 
+def test_screen_watcher_failure_reuses_the_error_event_type():
+    # The watcher runs off a background thread with no socket of its own
+    # (vision/watcher.py); this is the mapping that gives its failures a
+    # visible surface on the HUD instead of the screen context just going
+    # stale with nothing said about why. Reusing `error` rather than adding
+    # a type keeps tests/test_event_vocabulary_drift.py untouched.
+    envelope = server_app._screen_event_envelope("error", "host unreachable")
+
+    assert envelope["type"] == "error"
+    assert "host unreachable" in envelope["payload"]["text"]
+
+
+def test_screen_watcher_description_is_still_screen_context():
+    envelope = server_app._screen_event_envelope("description", "a terminal window")
+
+    assert envelope["type"] == "screen_context"
+    assert envelope["payload"]["text"] == "a terminal window"
+
+
 def test_cancel_between_turns_does_not_poison_the_next_prompt(monkeypatch):
     # Regression for the bug this feature is worth testing for: run_turn
     # leaves interrupter.interrupted set after an interrupted turn, and a

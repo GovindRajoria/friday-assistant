@@ -136,6 +136,52 @@ misread a screen — at 768 px it invented a program name that was not there,
 which is why frames are sent at 1280. Treat it as ambient context, not fact.
 Empty replies are dropped rather than published.
 
+### Pointing inference at another machine
+
+`llm.host` and `vlm.host` are independent settings — the language model and
+the vision model do not have to live on the same box, or even the same kind
+of hardware. The natural split is the small vision model on a Raspberry Pi 5
+and the language model staying local, since a describe pass is cheap and
+tolerates the extra network hop far better than the reasoning loop would; the
+reverse works too if the heavier model is what needs to move.
+
+```yaml
+llm:
+  host: http://127.0.0.1:11434   # keep local
+
+vlm:
+  host: http://192.168.1.42:11434   # Pi 5 on the LAN
+```
+
+On the remote machine, Ollama has to be told to listen beyond localhost:
+
+```bash
+OLLAMA_HOST=0.0.0.0 ollama serve
+```
+
+**Every call in the project still goes through `core/llm_client.py`,** so this
+is the only thing that changes — no other file cares where inference runs.
+
+**Unreachable hosts fall back, they do not fail every call.** The first time
+a configured host is used, `core/llm_client.py:_resolved_host` probes it
+(`GET /api/version`, a ~1.5 s timeout) and, if it does not answer, falls back
+to `http://127.0.0.1:11434` and prints exactly that:
+
+```
+[!] http://192.168.1.42:11434 is unreachable; falling back to http://127.0.0.1:11434 for the rest of this run.
+```
+
+The probe runs once per configured host per process, not once per call —
+resolving again means restarting. `llm.host` and `vlm.host` are resolved
+independently, so one can be offloaded successfully while the other falls
+back.
+
+**Nothing here is authenticated or encrypted.** This is a LAN-only
+arrangement: `OLLAMA_HOST=0.0.0.0` exposes the model — and the ability to run
+inference on that machine — to anything else on the same network, with no
+password and no TLS. Do this only on a network you trust, and see Known
+limitations below.
+
 ### The desktop shell
 
 `desktop/` is an Electron + React + Vite front end for the same server — a
@@ -356,6 +402,8 @@ Stated plainly, because they are the honest state of the project:
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
 - **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs seventeen pytest cases against the graph, the guard and the server — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - The server has no authentication. It is safe only because it refuses to bind to anything but a loopback address — any process on the machine can drive it, and it can launch applications and write files. Exposing the port would hand those capabilities to the network.
+- **Offloaded inference (`llm.host` / `vlm.host` pointed at another machine) is unauthenticated and unencrypted.** `OLLAMA_HOST=0.0.0.0 ollama serve` on the remote box puts its model, and the compute to run it, on the LAN with no password and no TLS — anyone on that network can talk to it exactly as this project does. This is a same-network, trusted-LAN feature, not something to expose past a router. The reachability probe only decides where a request goes; it does not add any security to the connection.
+- A remote vlm.host going quiet is handled — the watcher backs off, reports the failure, and resumes on its own when the host comes back — but a remote llm.host going quiet mid-turn still surfaces as a failed turn (an `error` event), not a silent retry. The fallback in `core/llm_client.py` only applies at first resolution per process; it does not re-probe a host that was reachable at startup and later drops.
 - If the Electron main process is killed outright rather than closed, a backend it spawned is orphaned. The kill runs from `before-quit`, `window-all-closed` and `process.on('exit')`, none of which fire on a hard kill. There is no watchdog; the next launch attaches to the survivor rather than colliding with it.
 - The orb never shows "speaking". The backend hands narration to a fire-and-forget speech thread and emits nothing when it finishes, so there is no event that could return the orb to idle afterwards — it goes straight back to idle when a turn ends rather than claiming a state whose end cannot be observed.
 - Screen descriptions come from a small model and are frequently wrong in detail. They are ambient context injected into the prompt, not a source of truth, and nothing downstream validates them.
