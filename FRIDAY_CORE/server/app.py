@@ -218,12 +218,40 @@ async def _start_screen_watcher() -> None:
     # a cycle instead of contending with an in-flight turn for the same
     # Ollama process (see vision/watcher.py's docstring for the measured
     # cost of not doing this).
-    _watcher = ScreenWatcher(SETTINGS, get_describer(SETTINGS), is_busy=lambda: _busy)
-    _watcher.start(on_description=lambda text: loop.call_soon_threadsafe(_screen_events.put_nowait, text))
+    #
+    # on_error exists because the watcher runs entirely off this event loop;
+    # a describe failure against a remote vlm.host had nowhere to surface
+    # before this, so the HUD's screen context would just go stale with
+    # nothing telling anyone why. The queue carries a (kind, text) pair
+    # rather than bare text so _drain_screen_events can tell a description
+    # from a failure and route each to the right wire event.
+    _watcher = ScreenWatcher(
+        SETTINGS, get_describer(SETTINGS), is_busy=lambda: _busy,
+        on_error=lambda error: loop.call_soon_threadsafe(_screen_events.put_nowait, ("error", str(error))),
+    )
+    _watcher.start(
+        on_description=lambda text: loop.call_soon_threadsafe(_screen_events.put_nowait, ("description", text))
+    )
+
+
+def _screen_event_envelope(kind: str, text: str) -> dict:
+    """Map one item off the watcher's queue to a wire event.
+
+    A failure reuses the existing `error` type rather than adding a new one
+    — the vocabulary drift gate (tests/test_event_vocabulary_drift.py) gates
+    server/events.py against desktop/src/events.ts, and `error` is already
+    the honest fit: a describe failure is exactly the same kind of thing to
+    the HUD as a failed turn, just arriving from the watcher thread instead
+    of _run_prompt. Split out of _drain_screen_events so the mapping is
+    testable without an event loop.
+    """
+    if kind == "error":
+        return events.envelope(events.ERROR, {"text": f"Screen awareness: {text}"})
+    return events.envelope(events.SCREEN_CONTEXT, {"text": text})
 
 
 async def _drain_screen_events() -> None:
-    """Fan the watcher's descriptions out to every connected HUD as they change.
+    """Fan the watcher's descriptions and failures out to every connected HUD.
 
     The watcher runs on its own thread and has no socket of its own; this
     task is the bridge, the same role _drain plays for a single turn in
@@ -231,8 +259,8 @@ async def _drain_screen_events() -> None:
     turn.
     """
     while True:
-        text = await _screen_events.get()
-        await _broadcast(events.envelope(events.SCREEN_CONTEXT, {"text": text}))
+        kind, text = await _screen_events.get()
+        await _broadcast(_screen_event_envelope(kind, text))
 
 
 async def _stop_screen_watcher() -> None:
