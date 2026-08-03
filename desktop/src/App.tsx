@@ -64,9 +64,6 @@ export function App() {
     [state.transcript],
   );
 
-  // A pending confirmation is a hard stop — the backend is blocked on this
-  // answer — so it takes over the panel area rather than being one more
-  // thing to notice further down the column.
   const pending = state.pendingConfirmation;
 
   return (
@@ -101,20 +98,26 @@ export function App() {
           ))}
         </nav>
 
+        {/* A pending confirmation sits above the panel rather than replacing
+            it. Replacing it hid the LOG at exactly the moment of decision —
+            and the model's stated reason for wanting the action is a
+            `thought` line in that log. The whole argument for keeping
+            narration a first-class field (docs/DESIGN.md) is that intent is
+            the feedback channel; hiding it to ask for authorisation is the
+            one place that must not happen. The socket's
+            `confirmation_required` payload carries only {name, input}, so
+            the transcript underneath is the only place that reasoning
+            appears at all. */}
+        <ConfirmationPrompt
+          pending={pending}
+          onApprove={() => sendConfirm(true)}
+          onDeny={() => sendConfirm(false)}
+        />
+
         <section className="panel">
-          {pending ? (
-            <ConfirmationPrompt
-              pending={pending}
-              onApprove={() => sendConfirm(true)}
-              onDeny={() => sendConfirm(false)}
-            />
-          ) : (
-            <>
-              {tab === "log" && <Transcript entries={state.transcript} />}
-              {tab === "sys" && <SystemsPanel health={health} />}
-              {tab === "vis" && <ScreenContext text={state.screenContext} />}
-            </>
-          )}
+          {tab === "log" && <Transcript entries={state.transcript} />}
+          {tab === "sys" && <SystemsPanel health={health} />}
+          {tab === "vis" && <ScreenContext text={state.screenContext} />}
         </section>
 
         <PromptInput
