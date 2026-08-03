@@ -9,6 +9,12 @@ const api: FridayApi = {
   setIgnoreMouseEvents(ignore, options) {
     ipcRenderer.send("hud:set-ignore-mouse-events", ignore, options);
   },
+  // invoke/handle, not send/on. Click-through is fire-and-forget and has
+  // nothing to return; health does, and copying that channel's shape would
+  // hand the renderer a function that quietly resolves to undefined.
+  getHealth() {
+    return ipcRenderer.invoke("hud:health");
+  },
 };
 
 contextBridge.exposeInMainWorld("friday", api);

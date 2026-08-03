@@ -17,19 +17,27 @@ const RECONNECT_DELAY_MS = 1500;
 export function useAgentSocket() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const socketRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<number | undefined>(undefined);
-  // Distinguishes "the effect is tearing down (StrictMode remount, unmount)"
-  // from "the network dropped us" — only the latter should schedule a
-  // reconnect, or every unmount would leave a stray timer racing to open a
-  // socket nothing is listening for anymore.
-  const tearingDownRef = useRef(false);
   const nextEventIdRef = useRef(0);
 
   useEffect(() => {
-    tearingDownRef.current = false;
+    // Per-effect-instance, deliberately not a ref.
+    //
+    // This was a ref shared across every run of the effect, and under
+    // StrictMode's double mount that leaked a socket on every launch:
+    // mount opens A, cleanup sets the flag and closes A, the second mount
+    // clears the flag and opens B — and only then does A's close event
+    // actually fire, sees a cleared flag, and reconnects as C. B and C both
+    // stay open, both receive the same broadcast, and both dispatch it, so
+    // the HUD rendered every thought, observation and answer twice and
+    // counted every turn twice. A closure variable belongs to the run that
+    // created the socket, which is the question being asked.
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
 
     function connect() {
-      const socket = new WebSocket(WS_URL);
+      if (disposed) return;
+      socket = new WebSocket(WS_URL);
       socketRef.current = socket;
 
       socket.onopen = () => dispatch({ kind: "connected" });
@@ -48,23 +56,25 @@ export function useAgentSocket() {
       };
 
       socket.onclose = () => {
+        // A socket this effect run already disowned must not report the
+        // disconnection either — the replacement is live, and dispatching
+        // here would flip the HUD to a fault it has already recovered from.
+        if (disposed) return;
         dispatch({ kind: "disconnected" });
-        if (!tearingDownRef.current) {
-          reconnectTimerRef.current = window.setTimeout(connect, RECONNECT_DELAY_MS);
-        }
+        reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
       };
 
       // A socket error is always followed by a close event in browsers'
       // WebSocket implementations; closing explicitly here just avoids
       // depending on that ordering being reliable across runtimes.
-      socket.onerror = () => socket.close();
+      socket.onerror = () => socket?.close();
     }
 
     connect();
     return () => {
-      tearingDownRef.current = true;
-      window.clearTimeout(reconnectTimerRef.current);
-      socketRef.current?.close();
+      disposed = true;
+      window.clearTimeout(reconnectTimer);
+      socket?.close();
     };
   }, []);
 

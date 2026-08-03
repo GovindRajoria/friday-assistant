@@ -22,6 +22,20 @@ describe("reducer", () => {
     expect(state.connected).toBe(true);
   });
 
+  it("clears a stale fault when the socket comes back", () => {
+    // Regression for a defect visible on every single launch: StrictMode
+    // mounts the socket effect twice, so the first teardown dispatched
+    // "disconnected" (orb: error) and the reconnect only set the flag back.
+    // The HUD then showed a red reactor labelled Fault directly above a
+    // status bar reporting a live link.
+    const dropped = reducer(initialState, { kind: "disconnected" });
+    expect(dropped.orb).toBe("error");
+
+    const back = reducer(dropped, { kind: "connected" });
+    expect(back.connected).toBe(true);
+    expect(back.orb).toBe("idle");
+  });
+
   it("treats a dropped connection as an error, not idle", () => {
     const connected = reducer(initialState, { kind: "connected" });
     const state = reducer(connected, { kind: "disconnected" });

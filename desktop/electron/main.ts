@@ -24,6 +24,11 @@ const HEALTH_URL = `http://${SERVER_HOST}:${SERVER_PORT}/health`;
 // visibly within a minute instead of leaving the window hidden forever.
 const HEALTH_POLL_BUDGET_MS = 60_000;
 const HEALTH_POLL_INTERVAL_MS = 500;
+// Used only by the HUD's own systems-panel poll, which runs long after
+// startup against a backend already known to be up. Generous compared to
+// the launch probe because a slow answer there should still be an answer,
+// not a panel that flickers to "unreachable" while a turn is in flight.
+const HEALTH_PROBE_TIMEOUT_MS = 4_000;
 
 // Where the Python backend lives, which is not the same question in a dev
 // checkout as in an installed app.
@@ -139,8 +144,8 @@ async function ensureBackend(): Promise<void> {
 
 function createWindow(): BrowserWindow {
   return new BrowserWindow({
-    width: 420,
-    height: 640,
+    width: 440,
+    height: 720,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -179,6 +184,16 @@ async function loadRenderer(win: BrowserWindow): Promise<void> {
 
 ipcMain.on("hud:set-ignore-mouse-events", (event, ignore: boolean, options?: { forward: boolean }) => {
   BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(Boolean(ignore), options);
+});
+
+// The HUD's systems panel asks for this on a timer. The throw is deliberate:
+// the renderer has to be able to tell "the backend answered with no skills"
+// apart from "the backend did not answer", and a resolved empty list reads
+// identically to the former.
+ipcMain.handle("hud:health", async (): Promise<{ status: string; skills: string[] }> => {
+  const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`health responded ${response.status}`);
+  return (await response.json()) as { status: string; skills: string[] };
 });
 
 app.whenReady().then(async () => {
