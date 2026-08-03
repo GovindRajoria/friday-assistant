@@ -175,6 +175,7 @@ async def _lifespan(_app: FastAPI):
     # since none of them run until uvicorn actually starts serving, well after
     # the whole module has finished loading.
     _start_speech()
+    _start_transcriber()
     await _start_screen_watcher()
     await _start_scheduler()
     yield
@@ -243,6 +244,51 @@ def _stop_speech() -> None:
     if _speech is not None:
         _speech.stop()
         _speech = None
+
+# Speech to text for the HUD's microphone. Loading the model is seconds of
+# work — more the first time, when the weights are being fetched — so it
+# happens on a worker thread and nothing waits for it here. /health must stay
+# instant: Electron will not show the window until it answers.
+_transcriber_task: "asyncio.Task | None" = None
+
+
+def _start_transcriber() -> None:
+    global _transcriber_task
+    if not SETTINGS["audio"].get("stt_enabled", True):
+        return
+    _transcriber_task = asyncio.create_task(asyncio.to_thread(_build_transcriber))
+
+
+def _build_transcriber():
+    # Imported inside the worker, not at module scope: faster_whisper is
+    # absent in CI and masked outright by
+    # tests/test_imports_without_runtime_deps.py, which imports this module.
+    from core.transcriber import Transcriber
+
+    return Transcriber(SETTINGS)
+
+
+async def _transcribe(audio: bytes) -> str:
+    """Text for one recorded utterance, or "" if nothing was said.
+
+    Awaiting the startup task is what makes a button press during a cold
+    start wait for the model rather than fail against a half-built one. A
+    task can be awaited any number of times; every later press resolves
+    immediately off the finished result.
+    """
+    # Ordinarily the lifespan handler has already started this at boot, so the
+    # first press pays nothing. Starting it here too means the load is
+    # triggered by whoever needs it first rather than depending on startup
+    # having run — which is also what makes this reachable under
+    # `TestClient(app).websocket_connect(...)`, the form used throughout
+    # tests/test_server.py, where no lifespan runs at all.
+    if _transcriber_task is None:
+        _start_transcriber()
+    if _transcriber_task is None:
+        raise RuntimeError("speech recognition is disabled (audio.stt_enabled is false)")
+    transcriber = await _transcriber_task
+    return await asyncio.to_thread(transcriber.transcribe, audio)
+
 
 _connections: set[WebSocket] = set()
 _memory_buffer: list[str] = []
@@ -528,6 +574,41 @@ async def _run_and_release(text: str) -> None:
         _busy = False
 
 
+async def _handle_utterance(audio: bytes) -> None:
+    """Transcribe one recorded utterance and report what was heard.
+
+    It reports; it does not run. The text is broadcast as a `transcript`
+    event and lands in the HUD's prompt box, where the operator reads it and
+    presses send. Feeding it straight into the graph would be one keystroke
+    shorter and would mean a misheard sentence becomes a request this
+    assistant acts on — and the actions available to it include deleting
+    files. Recognition being good is the reason that rarely happens; the
+    review step is the reason it does not matter when it does.
+
+    Not gated on `_busy` either. Hearing is not a turn: transcribing while an
+    answer is still streaming is fine, and the operator can line up their
+    next sentence while they wait.
+    """
+    try:
+        text = await _transcribe(audio)
+    except Exception as error:  # noqa: BLE001 — a failed transcription must not close the socket
+        # Covers the model failing to load at all (no faster-whisper, no disk
+        # space for the weights, stt_enabled off) as well as a blob that
+        # would not decode. All of them are things the operator can act on
+        # once they can see them, and none are worth dropping the connection.
+        await _broadcast(events.envelope(events.ERROR, {"text": f"Could not transcribe that: {error}"}))
+        return
+
+    if not text:
+        # The VAD found no speech. Saying so matters: without it, pressing
+        # the button and releasing it too early looks identical to the
+        # microphone being broken.
+        await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
+        return
+
+    await _broadcast(events.envelope(events.TRANSCRIPT, {"text": text}))
+
+
 @app.websocket("/ws")
 async def ws_endpoint(websocket: WebSocket):
     global _busy
@@ -535,7 +616,29 @@ async def ws_endpoint(websocket: WebSocket):
     _connections.add(websocket)
     try:
         while True:
-            raw = await websocket.receive_text()
+            # receive(), not receive_text(): the HUD's microphone sends the
+            # recorded utterance as a binary frame on this same socket. It is
+            # the only thing that ever sends binary, so the frame needs no
+            # header of its own — its type is the discriminator.
+            #
+            # A separate HTTP endpoint would have been the obvious home for an
+            # audio upload, but the renderer cannot reach one. A fetch from
+            # the renderer to 127.0.0.1:8756 is cross-origin, and allowing it
+            # means CORS headers on a server with no authentication, which
+            # hands the whole surface to any web page the operator visits.
+            # The WebSocket is already open and already exempt from that.
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                break
+
+            audio = message.get("bytes")
+            if audio is not None:
+                await _handle_utterance(audio)
+                continue
+
+            raw = message.get("text")
+            if raw is None:
+                continue
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:

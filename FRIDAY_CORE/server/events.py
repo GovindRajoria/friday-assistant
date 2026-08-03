@@ -30,10 +30,16 @@ CONFIRMATION_REQUIRED = "confirmation_required"
 # ANSWER because it is not the end of a turn: no question preceded it, the orb
 # must not move, and a pending confirmation must not be cleared by it.
 PROACTIVE = "proactive"
+# What the operator was heard to say. Emitted after an utterance recorded in
+# the HUD has been transcribed, and deliberately NOT the same thing as the
+# turn starting: the text lands in the prompt box for the operator to look at
+# and send, because a mishearing that runs straight into the graph is a
+# mishearing that can reach a destructive skill.
+TRANSCRIPT = "transcript"
 
 ALL_TYPES = frozenset({
     THOUGHT, ACTION, OBSERVATION, ANSWER, ANOMALY, ERROR, STATUS, SCREEN_CONTEXT, CONFIRMATION_REQUIRED,
-    PROACTIVE,
+    PROACTIVE, TRANSCRIPT,
 })
 
 

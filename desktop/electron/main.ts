@@ -11,7 +11,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, session } from "electron";
 import type { BackendReport } from "./api";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -445,8 +445,47 @@ ipcMain.handle("hud:write-profile", (_event, text: unknown): boolean => {
   }
 });
 
+// Reachable from anywhere, which is the point: dictating a request should not
+// require finding and focusing this window first. Ctrl+Shift+Space rather than
+// anything shorter because a global shortcut is taken from every other
+// application on the machine for as long as FRIDAY runs, so it has to be one
+// nothing else wants.
+const DICTATION_SHORTCUT = "CommandOrControl+Shift+Space";
+
+function registerDictationShortcut(win: BrowserWindow): void {
+  // Returns false when another application already holds the combination.
+  // Worth reporting rather than swallowing: the button in the HUD still works,
+  // and the operator would otherwise be left pressing keys that do nothing
+  // with no clue why.
+  const registered = globalShortcut.register(DICTATION_SHORTCUT, () => {
+    win.webContents.send("hud:toggle-dictation");
+  });
+  if (!registered) {
+    console.warn(`[friday-desktop] ${DICTATION_SHORTCUT} is already taken; use the Speak button.`);
+  }
+}
+
+// The renderer asks for the microphone the moment the operator presses Speak.
+// Electron grants permission requests by default when no handler is installed,
+// which would also grant camera, geolocation and notifications to anything
+// that ended up loaded in this window. Only audio capture is ever needed here,
+// so everything else is refused outright.
+function restrictPermissions(): void {
+  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => {
+    // "media" covers both microphone and camera, so the request is narrowed
+    // by what it actually asked for. There is no camera feature in this
+    // window — the webcam belongs to the vision skill, in Python, behind the
+    // confirmation gate — so a camera request here is something going wrong.
+    const audioOnly =
+      permission === "media" && (details as { mediaTypes?: string[] }).mediaTypes?.every((kind) => kind === "audio");
+    callback(Boolean(audioOnly));
+  });
+}
+
 app.whenReady().then(async () => {
+  restrictPermissions();
   mainWindow = createWindow();
+  registerDictationShortcut(mainWindow);
   // Loading starts immediately and races with the backend probe rather
   // than waiting on it — the renderer's own socket hook begins trying to
   // connect the moment it mounts and will succeed whenever the backend
@@ -457,6 +496,7 @@ app.whenReady().then(async () => {
   mainWindow.show();
 });
 
+app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("before-quit", killSpawnedServer);
 app.on("window-all-closed", () => {
   killSpawnedServer();

@@ -322,6 +322,18 @@
 .reactor--speaking .reactor__center { stroke: var(--green); }
 .reactor--speaking .reactor__center { fill: rgba(139, 255, 158, 0.16); filter: drop-shadow(0 0 14px rgba(139, 255, 158, 0.6)); }
 
+/* Recording. Red, and unmistakably not one of the model's own states — the
+   ring is spinning because the microphone is open, not because anything is
+   being reasoned about. */
+.reactor--listening .reactor__ring,
+.reactor--listening .reactor__center { stroke: var(--red); }
+.reactor--listening .reactor__center { fill: rgba(255, 107, 107, 0.18); filter: drop-shadow(0 0 16px rgba(255, 107, 107, 0.65)); }
+.reactor--listening .reactor__pulse { stroke: var(--red); animation: emit 1.1s ease-out infinite; }
+.reactor--listening .reactor__ring--outer { animation-duration: 2.4s; }
+.reactor--listening .reactor__ring--middle { animation-duration: 1.6s; }
+.reactor--listening .reactor__ring--inner { animation-duration: 1s; }
+.reactor--listening .reactor__label { color: var(--red); }
+
 .reactor--error .reactor__ring,
 .reactor--error .reactor__center { stroke: var(--red); }
 .reactor--error .reactor__center { fill: rgba(255, 107, 107, 0.16); filter: drop-shadow(0 0 14px rgba(255, 107, 107, 0.55)); }
@@ -520,6 +532,17 @@
   background: rgba(201, 155, 255, 0.08);
 }
 .transcript__entry--proactive .transcript__type { color: #c99bff; }
+
+/* What the microphone heard. Styled as the operator's own line rather than
+   one of the agent's, because that is what it is — and because seeing it
+   spelled out is how a wrong word gets caught before it is sent. */
+.transcript__entry--transcript {
+  border-left-color: rgba(216, 230, 240, 0.55);
+  background: rgba(216, 230, 240, 0.05);
+}
+
+.transcript__entry--transcript .transcript__type { color: #d8e6f0; }
+.transcript__entry--transcript .transcript__text { color: #d8e6f0; font-style: italic; }
 
 .transcript__entry--anomaly,
 .transcript__entry--error {
@@ -816,6 +839,39 @@
   border-color: rgba(255, 107, 107, 0.5);
   background: rgba(255, 107, 107, 0.1);
   color: var(--red);
+}
+
+/* The microphone. A live recording is the one state in this window where
+   something is being captured off the operator's hardware, so it is the
+   loudest thing on the bar while it lasts. */
+.command__button--mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.command__mic-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.command__button--mic-live {
+  border-color: rgba(255, 107, 107, 0.6);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--red);
+}
+
+.command__button--mic-live .command__mic-dot {
+  opacity: 1;
+  animation: mic-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.55); }
+  50% { opacity: 0.45; box-shadow: 0 0 0 5px rgba(255, 107, 107, 0); }
 }
 
 /* ------------------------------------------------------------- scrollbars */

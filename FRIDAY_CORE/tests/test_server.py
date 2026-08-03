@@ -473,3 +473,120 @@ def test_a_proactive_message_never_enters_the_conversation_transcript(monkeypatc
     asyncio.run(scenario())
 
     assert server_app._memory_buffer == []
+
+
+@pytest.fixture
+def no_loaded_model(monkeypatch):
+    """Forget any model a previous test caused to be built.
+
+    `_transcriber_task` is a module global and the model is deliberately
+    loaded once for the life of the process, so without this the second test
+    in this file would silently reuse the first one's fake and pass for the
+    wrong reason. monkeypatch's restore then puts None back, leaving the
+    module as clean as it started.
+    """
+    monkeypatch.setattr(server_app, "_transcriber_task", None)
+
+
+class _FakeTranscriber:
+    """Stands in for the loaded Whisper model.
+
+    Substituted at `_build_transcriber`, not at `_transcribe`, so the test
+    still exercises everything around it: the startup task, awaiting that task
+    from a request, and the `asyncio.to_thread` hop. Only the model itself is
+    fake.
+    """
+
+    def __init__(self, text="what is the weather", error=None):
+        self.text = text
+        self.error = error
+        self.received = []
+
+    def transcribe(self, audio):
+        self.received.append(audio)
+        if self.error is not None:
+            raise self.error
+        return self.text
+
+
+def test_a_recorded_utterance_comes_back_as_a_transcript(monkeypatch, no_loaded_model):
+    heard = _FakeTranscriber("what is the weather in Bhopal")
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: heard)
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"pretend this is WebM/Opus")
+        event = ws.receive_json()
+
+    assert event["type"] == "transcript"
+    assert event["payload"]["text"] == "what is the weather in Bhopal"
+    # The bytes reach the model untouched — nothing on the server decodes,
+    # re-encodes or reframes the recording.
+    assert heard.received == [b"pretend this is WebM/Opus"]
+
+
+def test_a_transcript_does_not_start_a_turn(monkeypatch, no_loaded_model):
+    # The whole reason `transcript` is its own event: what was heard goes to
+    # the prompt box for the operator to look at. If the server ran it, a
+    # misheard sentence would become a request this assistant carries out,
+    # and the skills it can reach include deleting files.
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("delete everything"))
+    called = []
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: called.append(a) or _decision(action="none"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")
+        assert ws.receive_json()["type"] == "transcript"
+
+    assert called == []
+    assert server_app._busy is False
+
+
+def test_silence_says_so_rather_than_going_quiet(monkeypatch, no_loaded_model):
+    # The VAD filter drops recordings with no speech in them. Without a reply,
+    # releasing the button too early is indistinguishable from a dead
+    # microphone.
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber(""))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"room tone")
+        event = ws.receive_json()
+
+    assert event["type"] == "status"
+    assert "not catch" in event["payload"]["text"]
+
+
+def test_a_failed_transcription_reports_itself_and_keeps_the_socket(monkeypatch, no_loaded_model):
+    # Covers the model failing to load at all as well as an undecodable blob:
+    # both surface here, and neither may take the connection down with them.
+    monkeypatch.setattr(
+        server_app, "_build_transcriber",
+        lambda: _FakeTranscriber(error=RuntimeError("no such model")),
+    )
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: _decision(action="none", thought="", final_answer="still here"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")
+        event = ws.receive_json()
+        assert event["type"] == "error"
+        assert "no such model" in event["payload"]["text"]
+
+        # Still usable afterwards — the point of catching it at all.
+        ws.send_text(json.dumps({"type": "prompt", "text": "are you there"}))
+        assert ws.receive_json()["payload"]["text"] == "still here"
+
+
+def test_speech_recognition_can_be_turned_off(monkeypatch, no_loaded_model):
+    # stt_enabled: false must mean the model is never built, not merely that
+    # the button is hidden — the point is not holding half a gigabyte of
+    # weights for a feature nobody uses.
+    built = []
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: built.append(1))
+    monkeypatch.setitem(SETTINGS["audio"], "stt_enabled", False)
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")
+        event = ws.receive_json()
+
+    assert built == []
+    assert event["type"] == "error"
+    assert "stt_enabled" in event["payload"]["text"]

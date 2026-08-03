@@ -78,6 +78,33 @@ DEFAULTS = {
         "pause_threshold": 2.0,
         "phrase_time_limit": 10,
         "speech_rate": 175,
+        # Speech recognition, shared by the console listener and the HUD's
+        # push-to-talk button so both hear the same way. Measured on this
+        # machine over an 8.58s utterance, CPU int8, warm cache: base.en
+        # 0.77s, small.en 2.08s, medium.en 8.39s, large-v3-turbo 11.75s,
+        # distil-large-v3 12.06s. Push-to-talk makes the operator wait for
+        # this before anything happens, so anything near realtime is out —
+        # small.en is a quarter of realtime and clearly better than base.en
+        # on accented speech. See core/transcriber.py for the full table.
+        # Off switch for the HUD's microphone. False also means the model is
+        # never loaded, so nothing is held in memory for a feature nobody uses.
+        "stt_enabled": True,
+        "stt_model": "small.en",
+        "stt_device": "cpu",
+        "stt_compute_type": "int8",
+        # Where the model weights are cached. None means huggingface_hub's
+        # default under the user's home; point it at another drive when C: is
+        # tight, since a large model is ~1.5 GB.
+        "stt_download_root": None,
+        # None lets Whisper detect. The ".en" models are English-only and
+        # ignore it; set it for a multilingual model to stop it switching
+        # language mid-sentence on an accent.
+        "stt_language": None,
+        # Extra proper nouns to bias recognition toward — colleagues, product
+        # names, anything a general English model keeps getting wrong. The
+        # assistant's name, the operator's name and their location are added
+        # automatically. Keep it short: this is a bias, not a dictionary.
+        "stt_vocabulary": "",
     },
     "vision": {
         "camera_index": 0,

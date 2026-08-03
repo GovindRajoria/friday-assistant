@@ -36,6 +36,15 @@ const api: FridayApi = {
   writeProfile(text) {
     return ipcRenderer.invoke("hud:write-profile", text);
   },
+  onToggleDictation(handler) {
+    // The listener is wrapped rather than passed through, so the renderer
+    // never receives Electron's IpcRendererEvent — handing that across the
+    // context bridge would leak `sender`, and with it a way to send on
+    // arbitrary channels from a context that is supposed to have none.
+    const listener = () => handler();
+    ipcRenderer.on("hud:toggle-dictation", listener);
+    return () => ipcRenderer.removeListener("hud:toggle-dictation", listener);
+  },
 };
 
 contextBridge.exposeInMainWorld("friday", api);
