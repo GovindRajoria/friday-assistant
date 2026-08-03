@@ -101,7 +101,14 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
 export function reducer(state: HudState, action: HudAction): HudState {
   switch (action.kind) {
     case "connected":
-      return { ...state, connected: true };
+      // The orb is reset, not just the flag. "disconnected" below moves the
+      // orb to "error", and nothing else ever moved it back — so a socket
+      // that dropped and reconnected left the HUD showing a fault next to a
+      // status bar reporting a live link. Seen on every launch, because
+      // React StrictMode mounts the socket effect twice: connect, tear down
+      // (error), reconnect. A reconnect also means any turn that was in
+      // flight is gone, so idle is the honest state either way.
+      return { ...state, connected: true, orb: "idle" };
     case "disconnected":
       // A dropped socket mid-turn should read as an error, not as if the
       // agent quietly finished — idle would look identical to "done".

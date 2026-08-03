@@ -189,9 +189,40 @@ limitations below.
 ### The desktop shell
 
 `desktop/` is an Electron + React + Vite front end for the same server — a
-frameless, transparent, always-on-top window showing an orb, the event
-transcript, and a prompt box. It is click-through except while the pointer is
-over it, so it can sit on top of other work without swallowing clicks.
+frameless, transparent, always-on-top window. It is click-through except while
+the pointer is over it, so it can sit on top of other work without swallowing
+clicks.
+
+The window is a reactor readout, a command line, a status bar, and three
+panels behind tabs:
+
+| Panel | Shows |
+|---|---|
+| **LOG** | The event stream, one line per event, colour-coded by type. The step-by-step types (`thought`, `action`, `observation`, `status`) can be muted with the chips above it; `answer`, `error` and `anomaly` deliberately cannot, so a filter can never hide the end of a turn. |
+| **SYS** | The skills the backend actually loaded, read from `GET /health` on a fifteen-second poll. |
+| **VIS** | The screen watcher's latest ambient description, when screen awareness is on. |
+
+A pending destructive action takes over the panel area entirely, listing the
+proposed call one parameter per line — the one moment the HUD asks a human to
+authorise something irreversible is not a good place for a single-line JSON
+blob nobody reads before clicking.
+
+Everything on screen is either observed in this window or came off the wire.
+There is no latency graph, no CPU gauge and no token counter, because the
+backend publishes none of those and a readout of invented numbers is worse
+than one with fewer numbers.
+
+**`/health` is fetched by the main process, not the renderer.** A renderer
+fetch to `127.0.0.1:8756` is cross-origin, and the only way to permit it would
+be CORS headers on a server that has no authentication — which would let any
+web page the operator visits read the endpoint. Main runs in Node, where
+same-origin policy does not apply, so the call goes over the preload bridge
+and the server's surface stays as narrow as it was.
+
+The prompt box keeps a shell-style history on the up and down arrows, and its
+button becomes **Stop** only while a turn is actually in flight — cancelling
+between turns does nothing, because the backend resets the interrupt flag at
+the start of each one.
 
 **It attaches rather than assumes ownership.** On launch it probes `/health`
 first; if something already answers on 8756 it attaches and will not stop that
@@ -465,7 +496,8 @@ Stated plainly, because they are the honest state of the project:
 - Screen descriptions come from a small model and are frequently wrong in detail. They are ambient context injected into the prompt, not a source of truth, and nothing downstream validates them.
 - Screen capture is local and never leaves the machine, but it is still a capture of whatever is on screen — it is off by default and worth leaving off while handling anything sensitive.
 - The packaged executable is unsigned, and it contains only the shell. It cannot run without a Python backend already installed on the machine, located through FRIDAY_CORE_DIR or placed beside the executable.
-- The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate, the process kill and the click-through toggling are verified by hand.
+- The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate, the process kill and the click-through toggling are verified by hand. Window dragging in particular resists automated checking: injected mouse input does not drive a Windows caption drag, so `-webkit-app-region` behaviour can only be confirmed by dragging the thing.
+- The confirmation prompt is a normal button. Nothing distinguishes a considered approval from a stray click on a floating always-on-top window, and the sixty-second timeout is the only thing standing between an unattended HUD and a request that waits forever — it denies, but it denies quietly.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 - Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.
 
