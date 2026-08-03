@@ -37,7 +37,7 @@ REQUIRED_KEYS = {"name", "description"}
 # synthesise input, sets it so core/graph.py routes to the confirmation node
 # instead of straight to `act`. Optional and defaulting to falsy — the nine
 # skills that predate this key declare nothing and must keep passing unchanged.
-ALLOWED_KEYS = REQUIRED_KEYS | {"parameters", "destructive"}
+ALLOWED_KEYS = REQUIRED_KEYS | {"parameters", "destructive", "terminal"}
 
 
 class Problem(Exception):
@@ -117,6 +117,12 @@ def validate(manifest: dict) -> None:
         if not isinstance(parameter, str) or not parameter.isidentifier():
             raise Problem(f"parameter {parameter!r} must be an identifier string")
 
+    if "terminal" in manifest and not isinstance(manifest["terminal"], bool):
+        raise Problem(
+            f"terminal must be a bool, got {type(manifest['terminal']).__name__} — "
+            "core/graph.py checks it with a plain truthiness test, so a stray string "
+            "like 'false' would end every turn that used this skill"
+        )
     if "destructive" in manifest and not isinstance(manifest["destructive"], bool):
         raise Problem(
             f"destructive must be a bool, got {type(manifest['destructive']).__name__} — "
