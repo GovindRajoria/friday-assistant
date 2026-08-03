@@ -586,6 +586,18 @@
   white-space: nowrap;
 }
 
+.systems__fault {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The detail carries a filesystem path, which has no spaces to wrap at.
+   break-word keeps it inside the rail instead of widening the grid column. */
+.systems__detail {
+  font-size: 10.5px;
+  word-break: break-word;
+}
+
 /* ----------------------------------------------------------------- vision */
 
 .vision {

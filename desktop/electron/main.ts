@@ -8,9 +8,11 @@
 // started. Attaching to an already-running server never touches it on
 // quit.
 import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, ipcMain } from "electron";
+import type { BackendReport } from "./api";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -124,22 +126,48 @@ function killSpawnedServer(): void {
   }
 }
 
+// What launch actually did, so the HUD can explain a dead link instead of
+// just reporting one.
+//
+// This exists because of a real report: someone ran the installer, launched
+// the app, and got "Disconnected" with nothing else. The installed shell has
+// no backend beside it and no FRIDAY_CORE_DIR, so it could not spawn one —
+// which is the documented design, but a HUD that knows exactly why it has
+// no backend and says only "disconnected" is withholding the one fact that
+// would fix it. Written to a module global and read back over IPC, since
+// main is the only side that knows where it looked.
+let backendReport: BackendReport = { kind: "starting" };
+
 async function ensureBackend(): Promise<void> {
   if (await probeHealth(2_000)) {
     // Something is already answering on 8756 — attach, and stop here.
     // Spawning a second server under a possibly-different interpreter is
     // exactly the collision this function exists to avoid.
+    backendReport = { kind: "attached" };
     return;
   }
+
+  if (!existsSync(PYTHON_EXE)) {
+    // Nothing to spawn. Distinguished from "spawned and never answered"
+    // because the fix is completely different: one is a missing path, the
+    // other is a backend that started and failed.
+    backendReport = { kind: "missing", coreDir: FRIDAY_CORE_DIR, pythonExe: PYTHON_EXE };
+    console.error(`[friday-desktop] no interpreter at ${PYTHON_EXE}; set FRIDAY_CORE_DIR`);
+    return;
+  }
+
   spawnServer();
   const healthy = await waitForHealth(HEALTH_POLL_BUDGET_MS);
   if (!healthy) {
-    // The window still gets shown below — the renderer's own socket
-    // connection will fail the same way and surface it as the HUD's error
-    // state, which is the visible failure this function owes the user
-    // rather than an indefinitely hidden window.
+    // The window still gets shown — the renderer's own socket connection
+    // fails the same way and surfaces it as the HUD's error state, which is
+    // the visible failure this function owes the user rather than an
+    // indefinitely hidden window.
+    backendReport = { kind: "silent", coreDir: FRIDAY_CORE_DIR, timeoutMs: HEALTH_POLL_BUDGET_MS };
     console.error(`[friday-desktop] backend did not answer ${HEALTH_URL} within ${HEALTH_POLL_BUDGET_MS}ms`);
+    return;
   }
+  backendReport = { kind: "spawned", coreDir: FRIDAY_CORE_DIR };
 }
 
 // An ordinary desktop window, not a floating overlay.
@@ -244,6 +272,8 @@ ipcMain.handle("hud:toggle-always-on-top", (event): boolean => {
 // the renderer has to be able to tell "the backend answered with no skills"
 // apart from "the backend did not answer", and a resolved empty list reads
 // identically to the former.
+ipcMain.handle("hud:backend-status", (): BackendReport => backendReport);
+
 ipcMain.handle("hud:health", async (): Promise<{ status: string; skills: string[] }> => {
   const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`health responded ${response.status}`);

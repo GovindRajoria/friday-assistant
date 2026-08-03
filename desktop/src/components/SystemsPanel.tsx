@@ -18,7 +18,15 @@ export function SystemsPanel({ health }: { health: HealthStatus }) {
   }
 
   if (health.kind === "unreachable") {
-    return <p className="panel__note panel__note--warn">Backend did not answer the last health probe.</p>;
+    // The reason, not just the fact. An installed shell with no backend
+    // beside it is the common case here, and the fix is a path — so print
+    // the path.
+    return (
+      <div className="systems__fault">
+        <p className="panel__note panel__note--warn">Backend unreachable.</p>
+        <p className="panel__note systems__detail">{health.detail}</p>
+      </div>
+    );
   }
 
   if (health.skills.length === 0) {

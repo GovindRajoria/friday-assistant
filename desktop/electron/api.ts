@@ -8,6 +8,20 @@ export interface HealthReport {
   skills: string[];
 }
 
+// What launch did about the backend, so a dead link can explain itself.
+//
+// `missing` and `silent` are kept apart deliberately: the first means there
+// was no interpreter to start (an installed shell with no FRIDAY_CORE beside
+// it and no FRIDAY_CORE_DIR), the second means one started and never
+// answered. Collapsing them into "backend unavailable" would hide the only
+// difference that changes what the operator has to do next.
+export type BackendReport =
+  | { kind: "starting" }
+  | { kind: "attached" }
+  | { kind: "spawned"; coreDir: string }
+  | { kind: "missing"; coreDir: string; pythonExe: string }
+  | { kind: "silent"; coreDir: string; timeoutMs: number };
+
 export interface FridayApi {
   // The window is frameless, so the controls a frame would have provided are
   // drawn in the renderer and bridged back to the BrowserWindow that owns it.
@@ -31,4 +45,7 @@ export interface FridayApi {
   // Rejects rather than resolving when the backend is unreachable, so the
   // caller can distinguish "no skills" from "could not ask".
   getHealth(): Promise<HealthReport>;
+
+  // What launch did about the backend. Only main knows where it looked.
+  getBackendStatus(): Promise<BackendReport>;
 }
