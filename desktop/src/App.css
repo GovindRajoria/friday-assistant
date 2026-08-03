@@ -499,14 +499,17 @@
 
 /* ---------------------------------------------------------- confirmation */
 
+/* Sits above the panel rather than replacing it, so the transcript — and the
+   thought explaining why the agent wants this — stays on screen while the
+   question is being answered. Capped and scrollable so a call with many
+   parameters cannot push the panel out of the window. */
 .confirm {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  max-height: 44vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 8px;
   padding: 12px;
   border: 1px solid rgba(255, 215, 110, 0.45);
   background: linear-gradient(180deg, rgba(255, 215, 110, 0.1), rgba(255, 215, 110, 0.03));
@@ -570,7 +573,6 @@
 .confirm__buttons {
   display: flex;
   gap: 8px;
-  margin-top: auto;
   padding-top: 4px;
 }
 
