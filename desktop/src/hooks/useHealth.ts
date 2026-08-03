@@ -37,8 +37,11 @@ function explain(report: Awaited<ReturnType<FridayApi["getBackendStatus"]>> | un
   }
 }
 
-export function useHealth(): HealthStatus {
+export function useHealth(): { health: HealthStatus; refresh: () => void } {
   const [status, setStatus] = useState<HealthStatus>({ kind: "loading" });
+  // Bumped to re-run the effect on demand — after locating a backend, waiting
+  // out the fifteen-second poll would look like the fix had not worked.
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     // Optional-chained for the same reason every other window.friday call in
@@ -82,7 +85,7 @@ export function useHealth(): HealthStatus {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [nonce]);
 
-  return status;
+  return { health: status, refresh: () => setNonce((value) => value + 1) };
 }

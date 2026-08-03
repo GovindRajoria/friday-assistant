@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import type { HealthStatus } from "../hooks/useHealth";
 
 // The skill roster the backend actually loaded, read from GET /health.
@@ -5,7 +6,7 @@ import type { HealthStatus } from "../hooks/useHealth";
 // Everything on this panel comes off the wire. The endpoint returns names
 // and nothing else, so names and a count are all that is shown — no latency
 // figures, no memory gauges, nothing this HUD would have to invent.
-export function SystemsPanel({ health }: { health: HealthStatus }) {
+export function SystemsPanel({ health, onRefresh }: { health: HealthStatus; onRefresh: () => void }) {
   if (health.kind === "loading") {
     return <p className="panel__note">Querying backend…</p>;
   }
@@ -18,13 +19,14 @@ export function SystemsPanel({ health }: { health: HealthStatus }) {
   }
 
   if (health.kind === "unreachable") {
-    // The reason, not just the fact. An installed shell with no backend
-    // beside it is the common case here, and the fix is a path — so print
-    // the path.
+    // The reason, not just the fact, and a way to act on it. A packaged app
+    // with no backend beside it is the common case, and telling someone an
+    // environment variable exists only helps if they know where to type it.
     return (
       <div className="systems__fault">
         <p className="panel__note panel__note--warn">Backend unreachable.</p>
         <p className="panel__note systems__detail">{health.detail}</p>
+        <LocateBackendButton onRefresh={onRefresh} />
       </div>
     );
   }
@@ -48,5 +50,27 @@ export function SystemsPanel({ health }: { health: HealthStatus }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/** Opens the folder picker in main, then re-polls so the panel reflects the
+ *  result immediately rather than after the next fifteen-second tick. */
+function LocateBackendButton({ onRefresh }: { onRefresh: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  const locate = useCallback(async () => {
+    setBusy(true);
+    try {
+      await window.friday?.locateBackend();
+    } finally {
+      setBusy(false);
+      onRefresh();
+    }
+  }, [onRefresh]);
+
+  return (
+    <button type="button" className="systems__locate" onClick={locate} disabled={busy}>
+      {busy ? "Starting…" : "Locate backend…"}
+    </button>
   );
 }

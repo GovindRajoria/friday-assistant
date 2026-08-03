@@ -48,4 +48,8 @@ export interface FridayApi {
 
   // What launch did about the backend. Only main knows where it looked.
   getBackendStatus(): Promise<BackendReport>;
+
+  // Opens a folder picker for FRIDAY_CORE, remembers the choice, and retries
+  // the backend. Resolves to the resulting state, unchanged if declined.
+  locateBackend(): Promise<BackendReport>;
 }

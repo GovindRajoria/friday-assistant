@@ -591,6 +591,22 @@
   overflow-y: auto;
 }
 
+.systems__locate {
+  margin-top: 10px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 215, 110, 0.5);
+  background: rgba(255, 215, 110, 0.1);
+  color: var(--amber);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.systems__locate:hover { background: rgba(255, 215, 110, 0.18); }
+.systems__locate:disabled { opacity: 0.5; cursor: default; }
+
 /* The detail carries a filesystem path, which has no spaces to wrap at.
    break-word keeps it inside the rail instead of widening the grid column. */
 .systems__detail {
