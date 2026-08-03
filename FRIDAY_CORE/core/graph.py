@@ -73,7 +73,16 @@ def route_after_confirm(state: AgentState) -> str:
     return "act" if state.get("action_approved") else "reason"
 
 
-def route_after_act(state: AgentState) -> str:
+def finish_node(state: AgentState) -> dict:
+    """End the turn with the observation as the answer.
+
+    Reached only from a skill whose manifest declares `terminal`, meaning its
+    output is the complete reply and there is nothing left to reason about.
+    """
+    return {"final_answer": state.get("observation", "")}
+
+
+def route_after_act(state: AgentState, active_skills: dict | None = None) -> str:
     # Only scan_environment (the webcam skill) produces detections worth
     # guarding on. This is deliberately webcam-specific, not just an
     # oversight to extend later (open item 2, carried from the Phase 4
@@ -84,6 +93,15 @@ def route_after_act(state: AgentState) -> str:
     # anomaly for this guard to see from it. If a future skill produces
     # person/object counts from something other than the webcam, add it to
     # this check explicitly rather than widening it speculatively now.
+    # A terminal skill's observation is the answer. Enforced here rather than
+    # asked for in the prompt, because asking did not work: given a complete
+    # answer from core_identity, the model kept going for eleven more steps,
+    # drafting documents and taking a webcam photo that muted the machine's
+    # audio, before hitting the step bound. The graph can simply not offer it
+    # the opportunity.
+    skill = (active_skills or {}).get(state.get("action"))
+    if skill is not None and skill.manifest.get("terminal"):
+        return "finish"
     return "anomaly_guard" if state.get("action") == "scan_environment" else "reason"
 
 
@@ -118,6 +136,7 @@ def build_graph(active_skills: dict, confirm=None):
     graph.add_node("act", lambda s: act_node(s, active_skills))
     graph.add_node("anomaly_guard", lambda s: anomaly_guard_node(s, active_skills))
     graph.add_node("nudge", nudge_node)
+    graph.add_node("finish", finish_node)
     graph.add_node("abort", abort_node)
 
     graph.set_entry_point("reason")
@@ -125,9 +144,10 @@ def build_graph(active_skills: dict, confirm=None):
                                 {"act": "act", "confirm": "confirm", "nudge": "nudge",
                                  "abort": "abort", END: END})
     graph.add_conditional_edges("confirm", route_after_confirm, {"act": "act", "reason": "reason"})
-    graph.add_conditional_edges("act", route_after_act,
-                                {"anomaly_guard": "anomaly_guard", "reason": "reason"})
+    graph.add_conditional_edges("act", lambda s: route_after_act(s, active_skills),
+                                {"anomaly_guard": "anomaly_guard", "reason": "reason", "finish": "finish"})
     graph.add_edge("anomaly_guard", "reason")
     graph.add_edge("nudge", "reason")
+    graph.add_edge("finish", END)
     graph.add_edge("abort", END)
     return graph.compile()
