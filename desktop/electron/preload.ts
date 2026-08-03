@@ -30,6 +30,12 @@ const api: FridayApi = {
   locateBackend() {
     return ipcRenderer.invoke("hud:locate-backend");
   },
+  readProfile() {
+    return ipcRenderer.invoke("hud:read-profile");
+  },
+  writeProfile(text) {
+    return ipcRenderer.invoke("hud:write-profile", text);
+  },
 };
 
 contextBridge.exposeInMainWorld("friday", api);

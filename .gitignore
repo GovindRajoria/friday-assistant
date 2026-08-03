@@ -15,6 +15,9 @@ FRIDAY_CORE/yolo11n_openvino_model/
 
 # Local runtime state and personal data
 FRIDAY_CORE/config/settings.yaml
+# The operator's own biography, injected into the system prompt. Personal
+# by definition and this repository is public — it never gets committed.
+FRIDAY_CORE/config/about_me.md
 FRIDAY_CORE/memory.db
 *.db
 FRIDAY_CORE/test_results.log

@@ -8,7 +8,7 @@
 // started. Attaching to an already-running server never touches it on
 // quit.
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
@@ -409,6 +409,40 @@ ipcMain.handle("hud:health", async (): Promise<{ status: string; skills: string[
   const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`health responded ${response.status}`);
   return (await response.json()) as { status: string; skills: string[] };
+});
+
+// The operator's biography, read and written straight off disk by main.
+//
+// Not an HTTP endpoint on the backend, deliberately. The server has no
+// authentication and is safe only because it refuses a non-loopback bind;
+// adding a write endpoint that persists text to a file widens that surface
+// for no gain, since main already knows where FRIDAY_CORE is. The backend
+// re-reads the file on every turn, so an edit here takes effect on the next
+// question with no restart.
+function profilePath(): string {
+  return path.join(FRIDAY_CORE_DIR, "config", "about_me.md");
+}
+
+ipcMain.handle("hud:read-profile", (): string => {
+  try {
+    return readFileSync(profilePath(), "utf8");
+  } catch {
+    // No profile written yet. An empty editor is the right starting point,
+    // not an error.
+    return "";
+  }
+});
+
+ipcMain.handle("hud:write-profile", (_event, text: unknown): boolean => {
+  if (typeof text !== "string") return false;
+  try {
+    mkdirSync(path.dirname(profilePath()), { recursive: true });
+    writeFileSync(profilePath(), text, "utf8");
+    return true;
+  } catch (error) {
+    console.error("[friday-desktop] could not save the profile:", error);
+    return false;
+  }
 });
 
 app.whenReady().then(async () => {

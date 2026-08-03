@@ -102,6 +102,28 @@ def build_system_prompt(active_skills: dict) -> str:
         4. NO FILLER ACTIONS: Do not use `core_identity` unless asked "Who are you?".
         5. SINGLE ACTIONS: Execute one tool per thought, but plan the chain in your `thought`.
 
+        {_about_operator_block()}
         AVAILABLE ACTIONS:
         {json.dumps(skill_context, indent=2)}
         """
+
+
+def _about_operator_block() -> str:
+    """The operator's own biography, or nothing at all when they have not written one.
+
+    In the system prompt rather than the per-turn user message because it is
+    durable: who the operator is does not change between turns, and repeating
+    it in every message would spend context re-establishing the same facts.
+    Returns "" when the file is absent so a fresh checkout gets a prompt with
+    no empty heading dangling in it.
+    """
+    from core.profile import load_profile
+
+    about = load_profile()
+    if not about:
+        return ""
+    return (
+        "ABOUT THE OPERATOR — who you are speaking to. Ground your answers in this; "
+        "it is durable fact, not something to look up:\n"
+        f"{about}\n"
+    )

@@ -5,7 +5,7 @@ import { useCallback, useState } from "react";
 // It is the only surface marked -webkit-app-region: drag (in App.css), and
 // every control inside it has to opt back out with no-drag or the OS takes
 // the click as the start of a window move and the button never fires.
-export function TitleBar() {
+export function TitleBar({ onEditProfile }: { onEditProfile: () => void }) {
   // Mirrored from what main reports after the call, not set optimistically —
   // the window is the authority on whether it is actually on top. Local
   // state rather than the reducer: nothing about pinning arrived over the
@@ -29,6 +29,9 @@ export function TitleBar() {
       </div>
 
       <div className="titlebar__controls">
+        <button type="button" className="titlebar__pin" onClick={onEditProfile} title="Edit what FRIDAY knows about you">
+          ABOUT ME
+        </button>
         <button
           type="button"
           className={`titlebar__pin ${pinned ? "titlebar__pin--on" : ""}`}

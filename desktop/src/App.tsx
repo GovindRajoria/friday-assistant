@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ConfirmationPrompt } from "./components/ConfirmationPrompt";
+import { ProfileEditor } from "./components/ProfileEditor";
 import { PromptInput } from "./components/PromptInput";
 import { Reactor } from "./components/Reactor";
 import { ScreenContext } from "./components/ScreenContext";
@@ -14,6 +15,9 @@ import "./App.css";
 export function App() {
   const { state, sendPrompt, sendCancel, sendConfirm } = useAgentSocket();
   const { health, refresh: refreshHealth } = useHealth();
+  // Whether the biography editor is open is a view preference, not
+  // something the backend said, so it stays out of the reducer.
+  const [editingProfile, setEditingProfile] = useState(false);
 
   // Counted off the transcript rather than tracked separately: an `answer`
   // is the terminal event of a turn, so the number of them is the number of
@@ -26,7 +30,8 @@ export function App() {
   return (
     <div className="hud">
       <span className="hud__scan" aria-hidden="true" />
-      <TitleBar />
+      <TitleBar onEditProfile={() => setEditingProfile(true)} />
+      {editingProfile && <ProfileEditor onClose={() => setEditingProfile(false)} />}
 
       {/* Three columns rather than one narrow tabbed stack. The window is a
           desktop window now, so everything the HUD knows fits on screen at

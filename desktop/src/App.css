@@ -836,3 +836,105 @@
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------- overlay */
+
+/* The biography editor. Covers the whole window rather than living in a rail
+   — this is prose someone sits and writes, and a 288px column is not
+   somewhere anybody writes prose. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  background: rgba(3, 6, 9, 0.82);
+}
+
+.overlay__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 820px;
+  height: 100%;
+  padding: 20px 22px;
+  border: 1px solid var(--edge-bright);
+  background: linear-gradient(180deg, #0a1016, #06090d);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+
+.overlay__header {
+  flex: 0 0 auto;
+}
+
+.overlay__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.overlay__subtitle {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+}
+
+.overlay__subtitle code {
+  font-family: inherit;
+  color: var(--cyan);
+}
+
+.overlay__textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 14px;
+  resize: none;
+  border: 1px solid var(--edge);
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.65;
+  outline: none;
+}
+
+.overlay__textarea:focus {
+  border-color: var(--edge-bright);
+}
+
+.overlay__buttons {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.overlay__button {
+  padding: 9px 22px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.overlay__button:hover { background: rgba(255, 255, 255, 0.06); }
+
+.overlay__button--primary {
+  border-color: var(--edge-bright);
+  background: rgba(110, 231, 255, 0.1);
+  color: var(--cyan);
+}
+
+.overlay__button--primary:hover { background: rgba(110, 231, 255, 0.18); }
+.overlay__button:disabled { opacity: 0.45; cursor: default; }
