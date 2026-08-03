@@ -27,6 +27,9 @@ const api: FridayApi = {
   getBackendStatus() {
     return ipcRenderer.invoke("hud:backend-status");
   },
+  locateBackend() {
+    return ipcRenderer.invoke("hud:locate-backend");
+  },
 };
 
 contextBridge.exposeInMainWorld("friday", api);

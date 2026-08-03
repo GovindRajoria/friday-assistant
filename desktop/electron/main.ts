@@ -8,10 +8,10 @@
 // started. Attaching to an already-running server never touches it on
 // quit.
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import type { BackendReport } from "./api";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,30 +32,89 @@ const HEALTH_POLL_INTERVAL_MS = 500;
 // not a panel that flickers to "unreachable" while a turn is in flight.
 const HEALTH_PROBE_TIMEOUT_MS = 4_000;
 
-// Where the Python backend lives, which is not the same question in a dev
-// checkout as in an installed app.
+// Where the Python backend lives, which is a different question in a dev
+// checkout, an installed app, and a portable executable.
 //
-// Unpackaged, electron-vite has written this file to out/main in both `dev`
-// and `build` — dev is not an in-memory run of electron/main.ts, it builds
-// to disk too, just with a watcher. So __dirname is out/main either way, and
-// three levels up lands on the repo root (desktop/../.. is FRIDAY, the parent
-// of both desktop/ and FRIDAY_CORE/).
+// The installer ships only the shell — bundling a 1.1 GB virtualenv, a vision
+// model and a 4.9 GB language model is not a download anyone wants — so a
+// packaged HUD has to find an existing backend. It tries several places in
+// order, and remembers the answer, because being told once should be enough.
 //
-// Packaged, that resolution walks into app.asar and finds nothing. The
-// installer ships only the shell — bundling a 1.1 GB virtualenv, a vision
-// model and a 4.9 GB language model into an installer is not a thing anyone
-// wants to download — so an installed HUD has to be told where an existing
-// backend is. FRIDAY_CORE_DIR is that answer, and the directory beside the
-// executable is the fallback for keeping the two side by side.
-function resolveFridayCoreDir(): string {
-  const fromEnv = process.env.FRIDAY_CORE_DIR;
-  if (fromEnv) return path.resolve(fromEnv);
-  if (!app.isPackaged) return path.join(path.resolve(__dirname, "..", "..", ".."), "FRIDAY_CORE");
-  return path.join(path.dirname(app.getPath("exe")), "FRIDAY_CORE");
+// `PORTABLE_EXECUTABLE_DIR` is not optional here, it is the fix for a real
+// failure. electron-builder's portable target unpacks itself into a fresh
+// `%TEMP%\<random>` directory on every launch and runs from there, so
+// `dirname(app.getPath("exe"))` is that throwaway folder and "beside the
+// executable" can never resolve to anything. Reported from the field as
+// `...\AppData\Local\Temp\3HOsQMP2od...\FRIDAY_CORE\friday_env\...`.
+// electron-builder sets this variable to where the .exe actually lives.
+function backendConfigFile(): string {
+  return path.join(app.getPath("userData"), "backend.json");
 }
 
-const FRIDAY_CORE_DIR = resolveFridayCoreDir();
-const PYTHON_EXE = path.join(FRIDAY_CORE_DIR, "friday_env", "Scripts", "python.exe");
+function rememberedCoreDir(): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(backendConfigFile(), "utf8")) as { coreDir?: string };
+    return parsed.coreDir ?? null;
+  } catch {
+    // No file yet, or an unreadable one. Either way there is nothing to
+    // remember and the other candidates still apply.
+    return null;
+  }
+}
+
+function rememberCoreDir(dir: string): void {
+  try {
+    writeFileSync(backendConfigFile(), JSON.stringify({ coreDir: dir }, null, 2), "utf8");
+  } catch (error) {
+    // Not fatal: the app works for this session, it just asks again next time.
+    console.error("[friday-desktop] could not save the backend location:", error);
+  }
+}
+
+// A directory is only a backend if it has an interpreter in it. Checking for
+// the venv rather than for the folder name is what makes the picker below
+// able to reject a wrong choice immediately instead of failing 60s later.
+function looksLikeCore(dir: string): boolean {
+  return existsSync(path.join(dir, "friday_env", "Scripts", "python.exe"))
+    || existsSync(path.join(dir, "friday_env", "bin", "python"));
+}
+
+function candidateCoreDirs(): string[] {
+  const candidates: string[] = [];
+  if (process.env.FRIDAY_CORE_DIR) candidates.push(path.resolve(process.env.FRIDAY_CORE_DIR));
+  const remembered = rememberedCoreDir();
+  if (remembered) candidates.push(remembered);
+  if (process.env.PORTABLE_EXECUTABLE_DIR) {
+    candidates.push(path.join(process.env.PORTABLE_EXECUTABLE_DIR, "FRIDAY_CORE"));
+  }
+  if (!app.isPackaged) {
+    // electron-vite writes this file to out/main under both `dev` and
+    // `build` — dev builds to disk too, just with a watcher — so __dirname
+    // is out/main either way and three levels up is the repo root.
+    candidates.push(path.join(path.resolve(__dirname, "..", "..", ".."), "FRIDAY_CORE"));
+  }
+  candidates.push(path.join(path.dirname(app.getPath("exe")), "FRIDAY_CORE"));
+  return candidates;
+}
+
+function resolveFridayCoreDir(): string {
+  const candidates = candidateCoreDirs();
+  // The first one that actually holds an interpreter wins. Falling back to
+  // the last candidate rather than to nothing keeps the error message able
+  // to name a concrete path.
+  return candidates.find(looksLikeCore) ?? candidates[candidates.length - 1];
+}
+
+// Mutable, because the picker below can change the answer at runtime and
+// everything downstream — the spawn, the error report, the retry — has to
+// see the new one.
+let FRIDAY_CORE_DIR = resolveFridayCoreDir();
+let PYTHON_EXE = path.join(FRIDAY_CORE_DIR, "friday_env", "Scripts", "python.exe");
+
+function useCoreDir(dir: string): void {
+  FRIDAY_CORE_DIR = dir;
+  PYTHON_EXE = path.join(dir, "friday_env", "Scripts", "python.exe");
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -138,6 +197,58 @@ function killSpawnedServer(): void {
 // main is the only side that knows where it looked.
 let backendReport: BackendReport = { kind: "starting" };
 
+/** Ask the operator where FRIDAY_CORE is, and validate the answer on the spot.
+ *
+ * Rejecting a wrong folder immediately, by looking for the virtualenv inside
+ * it, is the difference between "that isn't it, try again" and a sixty-second
+ * wait for a health probe that was never going to succeed. Returns null if
+ * they decline, which is a legitimate choice — the HUD still opens and says
+ * what is missing.
+ */
+async function askForCoreDir(): Promise<string | null> {
+  const intro = await dialog.showMessageBox({
+    type: "info",
+    title: "FRIDAY — backend not found",
+    message: "FRIDAY could not find its Python backend.",
+    detail:
+      "The installer ships the interface only — the backend, its virtual environment and the "
+      + "models are far too large to bundle.\n\nPoint FRIDAY at the FRIDAY_CORE folder from your "
+      + "checkout and it will be remembered for next time.",
+    buttons: ["Locate FRIDAY_CORE…", "Not now"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  if (intro.response !== 0) return null;
+
+  // Loops rather than giving up on a wrong pick — choosing the repo root
+  // instead of FRIDAY_CORE is an easy mistake and not worth restarting for.
+  for (;;) {
+    const picked = await dialog.showOpenDialog({
+      title: "Select your FRIDAY_CORE folder",
+      properties: ["openDirectory"],
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return null;
+
+    const chosen = picked.filePaths[0];
+    if (looksLikeCore(chosen)) return chosen;
+    // Accept the parent too: picking E:\FRIDAY when FRIDAY_CORE is inside it
+    // is the obvious near-miss.
+    const nested = path.join(chosen, "FRIDAY_CORE");
+    if (looksLikeCore(nested)) return nested;
+
+    const retry = await dialog.showMessageBox({
+      type: "warning",
+      title: "Not a FRIDAY backend",
+      message: "That folder has no FRIDAY virtual environment in it.",
+      detail: `Looked for friday_env inside ${chosen}.\n\nPick the FRIDAY_CORE folder itself.`,
+      buttons: ["Try again", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (retry.response !== 0) return null;
+  }
+}
+
 async function ensureBackend(): Promise<void> {
   if (await probeHealth(2_000)) {
     // Something is already answering on 8756 — attach, and stop here.
@@ -148,12 +259,21 @@ async function ensureBackend(): Promise<void> {
   }
 
   if (!existsSync(PYTHON_EXE)) {
-    // Nothing to spawn. Distinguished from "spawned and never answered"
-    // because the fix is completely different: one is a missing path, the
-    // other is a backend that started and failed.
-    backendReport = { kind: "missing", coreDir: FRIDAY_CORE_DIR, pythonExe: PYTHON_EXE };
-    console.error(`[friday-desktop] no interpreter at ${PYTHON_EXE}; set FRIDAY_CORE_DIR`);
-    return;
+    // Nothing to spawn. Ask, rather than leaving the operator to work out
+    // that an environment variable exists — being told the path is the fix
+    // is only useful to someone who already knows where to type it.
+    const chosen = await askForCoreDir();
+    if (chosen) {
+      useCoreDir(chosen);
+      rememberCoreDir(chosen);
+    } else {
+      // Distinguished from "spawned and never answered": one is a missing
+      // path, the other is a backend that started and failed, and the fix
+      // for each is different.
+      backendReport = { kind: "missing", coreDir: FRIDAY_CORE_DIR, pythonExe: PYTHON_EXE };
+      console.error(`[friday-desktop] no interpreter at ${PYTHON_EXE}; set FRIDAY_CORE_DIR`);
+      return;
+    }
   }
 
   spawnServer();
@@ -273,6 +393,17 @@ ipcMain.handle("hud:toggle-always-on-top", (event): boolean => {
 // apart from "the backend did not answer", and a resolved empty list reads
 // identically to the former.
 ipcMain.handle("hud:backend-status", (): BackendReport => backendReport);
+
+// The same picker the launch path uses, reachable from the HUD so a missing
+// backend can be fixed without restarting the app or opening a shell.
+ipcMain.handle("hud:locate-backend", async (): Promise<BackendReport> => {
+  const chosen = await askForCoreDir();
+  if (!chosen) return backendReport;
+  useCoreDir(chosen);
+  rememberCoreDir(chosen);
+  await ensureBackend();
+  return backendReport;
+});
 
 ipcMain.handle("hud:health", async (): Promise<{ status: string; skills: string[] }> => {
   const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS) });

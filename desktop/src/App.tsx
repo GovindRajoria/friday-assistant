@@ -13,7 +13,7 @@ import "./App.css";
 
 export function App() {
   const { state, sendPrompt, sendCancel, sendConfirm } = useAgentSocket();
-  const health = useHealth();
+  const { health, refresh: refreshHealth } = useHealth();
 
   // Counted off the transcript rather than tracked separately: an `answer`
   // is the terminal event of a turn, so the number of them is the number of
@@ -54,7 +54,7 @@ export function App() {
         <aside className="rail rail--right">
           <div className="rail__section">
             <h2 className="rail__heading">Systems</h2>
-            <SystemsPanel health={health} />
+            <SystemsPanel health={health} onRefresh={refreshHealth} />
           </div>
           <div className="rail__section rail__section--vision">
             <h2 className="rail__heading">Screen</h2>
