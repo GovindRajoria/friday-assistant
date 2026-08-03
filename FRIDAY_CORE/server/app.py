@@ -296,6 +296,9 @@ _busy = False  # single-flight flag; see the module docstring for why not a lock
 # Strong references to in-flight turn tasks. asyncio only holds a weak one, so
 # a task nothing references can be garbage collected mid-run.
 _turns: set[asyncio.Task] = set()
+# Same reason as _turns: asyncio holds only a weak reference, so a
+# transcription nothing else references can be collected mid-run.
+_utterances: set[asyncio.Task] = set()
 
 # vision.watcher.ScreenWatcher instance, created at startup only when
 # screen.enabled — stays None otherwise, which is what makes "screen.enabled:
@@ -633,7 +636,15 @@ async def ws_endpoint(websocket: WebSocket):
 
             audio = message.get("bytes")
             if audio is not None:
-                await _handle_utterance(audio)
+                # A task, not an inline await, for exactly the reason the
+                # prompt below is a task: awaiting here blocks this receive
+                # loop for the whole transcription, and the HUD is one
+                # connection. That would leave it unable to cancel, unable to
+                # answer a pending confirmation and unable to send anything
+                # for two seconds on a warm model — or for the length of a
+                # 460 MB download on the very first press after an install.
+                _utterances.add(job := asyncio.create_task(_handle_utterance(audio)))
+                job.add_done_callback(_utterances.discard)
                 continue
 
             raw = message.get("text")

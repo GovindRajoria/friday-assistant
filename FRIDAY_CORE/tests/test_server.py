@@ -590,3 +590,44 @@ def test_speech_recognition_can_be_turned_off(monkeypatch, no_loaded_model):
     assert built == []
     assert event["type"] == "error"
     assert "stt_enabled" in event["payload"]["text"]
+
+
+def test_a_slow_transcription_does_not_make_the_socket_deaf(monkeypatch, no_loaded_model):
+    """The receive loop must keep reading while an utterance is transcribed.
+
+    Awaiting the transcription inline blocks this connection for its whole
+    duration — two seconds on a warm model, and the length of a 460 MB
+    download on the first press after an install. A HUD is one connection, so
+    for that window it could not cancel, could not answer a pending
+    confirmation, and could not send anything at all. Same reasoning, and the
+    same fix, as the prompt path directly below it in ws_endpoint.
+    """
+    started = threading.Event()
+    release = threading.Event()
+
+    class _SlowTranscriber:
+        def transcribe(self, audio):
+            started.set()
+            release.wait(timeout=5)
+            return "the slow one"
+
+    monkeypatch.setattr(server_app, "_build_transcriber", _SlowTranscriber)
+    monkeypatch.setattr(
+        "core.llm_client.chat",
+        lambda *a, **k: _decision(action="none", thought="", final_answer="answered anyway"),
+    )
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"a long recording")
+        assert started.wait(timeout=5), "transcription never began"
+
+        # Sent while the transcription is still running, and answered while it
+        # is still running. If the loop were blocked this would sit in the
+        # socket buffer until the transcription finished.
+        ws.send_text(json.dumps({"type": "prompt", "text": "are you listening"}))
+        answer = ws.receive_json()
+        assert answer["type"] == "answer"
+        assert answer["payload"]["text"] == "answered anyway"
+
+        release.set()
+        assert ws.receive_json()["type"] == "transcript"
