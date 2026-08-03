@@ -18,6 +18,9 @@ FRIDAY_CORE/config/settings.yaml
 # The operator's own biography, injected into the system prompt. Personal
 # by definition and this repository is public — it never gets committed.
 FRIDAY_CORE/config/about_me.md
+# Reminder bodies are whatever the operator asked to be reminded of,
+# which is personal, and this repository is public.
+FRIDAY_CORE/config/reminders.json
 FRIDAY_CORE/memory.db
 *.db
 FRIDAY_CORE/test_results.log

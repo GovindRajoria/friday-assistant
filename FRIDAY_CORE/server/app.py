@@ -34,6 +34,7 @@ import platform
 import queue
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime, time
 
 import uvicorn
 from core.config import SETTINGS
@@ -175,7 +176,9 @@ async def _lifespan(_app: FastAPI):
     # the whole module has finished loading.
     _start_speech()
     await _start_screen_watcher()
+    await _start_scheduler()
     yield
+    await _stop_scheduler()
     await _stop_screen_watcher()
     _stop_speech()
 
@@ -333,6 +336,95 @@ async def _drain_screen_events() -> None:
     while True:
         kind, text = await _screen_events.get()
         await _broadcast(_screen_event_envelope(kind, text))
+
+
+_scheduler = None
+_proactive_events = None
+_proactive_drain_task = None
+
+
+async def _start_scheduler() -> None:
+    """Start reminders and the daily briefing, only when the operator opted in."""
+    if not SETTINGS.get("proactive", {}).get("enabled", False):
+        return
+
+    from core.scheduler import Scheduler
+
+    global _scheduler, _proactive_events, _proactive_drain_task
+    _proactive_events = asyncio.Queue()
+    _proactive_drain_task = asyncio.create_task(_drain_proactive_events())
+
+    loop = asyncio.get_running_loop()
+    # Everything crosses to the loop before any decision is made about it.
+    # The scheduler thread cannot read _busy safely — a turn can start
+    # between a check on that thread and the emit that follows it — so the
+    # thread's only job is to hand over (kind, text) and the loop decides.
+    _scheduler = Scheduler(
+        SETTINGS, active_skills,
+        on_event=lambda kind, text: loop.call_soon_threadsafe(_proactive_events.put_nowait, (kind, text)),
+        on_error=lambda error: loop.call_soon_threadsafe(
+            _proactive_events.put_nowait, ("error", str(error))),
+    )
+    _scheduler.start()
+
+
+async def _stop_scheduler() -> None:
+    if _scheduler is not None:
+        _scheduler.stop()
+    if _proactive_drain_task is not None:
+        _proactive_drain_task.cancel()
+
+
+def _proactive_envelope(kind: str, text: str) -> dict:
+    """Map one scheduler item to a wire event.
+
+    A scheduler failure reuses `error`, exactly as the watcher's does — it is
+    the same kind of thing to the HUD, just arriving from a different thread.
+    """
+    if kind == "error":
+        return events.envelope(events.ERROR, {"text": f"Scheduler: {text}"})
+    return events.envelope(events.PROACTIVE, {"text": text})
+
+
+async def _drain_proactive_events() -> None:
+    """Deliver reminders and briefings to every connected HUD, and speak them.
+
+    Deliberately does NOT touch `_busy`. A proactive message is not a turn:
+    setting the flag would make the operator's very next prompt bounce off
+    "Already processing a request", and clearing it could release a real turn
+    that is still running. It also stays out of `_memory_buffer` — that is
+    the conversational transcript fed into the next prompt, and a briefing
+    injected there becomes something the model believes the operator said.
+    """
+    while True:
+        kind, text = await _proactive_events.get()
+        # Re-read on the loop, where it is actually coherent. If a turn is in
+        # flight the message waits for the next tick rather than interleaving
+        # with the answer the operator is reading.
+        if kind != "error" and _busy:
+            continue
+        await _broadcast(_proactive_envelope(kind, text))
+        if kind != "error":
+            _speak_proactive(text)
+
+
+def _speak_proactive(text: str) -> None:
+    """Say it out loud, unless it is the middle of the night.
+
+    Quiet hours gate the voice and nothing else — the message has already
+    been broadcast by the time this runs, so a 03:00 briefing is silently
+    waiting in the HUD rather than missing.
+    """
+    if _speech is None:
+        return
+    from core.scheduler import in_quiet_hours, parse_hhmm
+
+    config = SETTINGS.get("proactive", {})
+    start = parse_hhmm(config.get("quiet_start", "22:00"), time(22, 0))
+    end = parse_hhmm(config.get("quiet_end", "07:00"), time(7, 0))
+    if in_quiet_hours(datetime.now().time(), start, end):
+        return
+    _speech.speak(text)
 
 
 async def _stop_screen_watcher() -> None:

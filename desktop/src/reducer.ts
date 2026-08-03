@@ -89,6 +89,12 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
     case "anomaly":
     case "error":
       return "error";
+    case "proactive":
+      // Nothing asked for this, so nothing about the turn changed. Moving the
+      // orb here would show a reminder as though the agent had started
+      // thinking, and it must not clear a pending confirmation either — the
+      // backend is still blocked waiting on that answer.
+      return previous;
     default:
       // screen_context lands here too, though in practice the reducer
       // never calls this function for it — it is intercepted earlier in

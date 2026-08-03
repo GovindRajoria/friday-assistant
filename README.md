@@ -281,6 +281,35 @@ around twelve seconds.
 
 ---
 
+### Speaking without being spoken to
+
+Off by default, under `proactive` in settings. Two things it will do
+unprompted: deliver reminders you set, and read a short briefing at a
+configured time.
+
+**The briefing does not go through the reasoning loop, and that is the whole
+design.** A free agent turn picks its own tools, and this project has watched
+that go wrong twice in one day — a capabilities question that drafted two
+documents and took a webcam photo, and a news request answered with invented
+headlines. Supervised those are irritating; unattended at 08:00 they are not
+acceptable. So `core/briefing.py` calls a fixed, read-only list of skills
+directly and spends exactly one model call turning the results into prose. It
+cannot choose a different tool and it cannot write anything, because it is
+never asked what to do.
+
+Three behaviours worth knowing:
+
+- **A proactive message waits while a turn is running.** It is not a turn
+  itself: it never sets the single-flight flag, so it cannot make your next
+  prompt bounce, and it never enters the conversation transcript, so the model
+  never mistakes a briefing for something you said.
+- **Quiet hours silence the voice, not the message.** A briefing during quiet
+  hours still appears in the HUD; it just does not speak.
+- **A missed reminder fires late, a missed briefing is dropped.** These differ
+  on purpose. A reminder is a promise you stopped holding yourself, so late is
+  recoverable and silence is not — it says how late it was. A breakfast
+  briefing delivered at lunchtime is stale noise.
+
 ### OS automation and the confirmation gate
 
 Some skills type keystrokes and delete files. Those run behind two independent
@@ -366,6 +395,7 @@ def setup():
 | `read_webpage` | Fetches a URL and extracts its readable text, for summarising a link or a story behind a headline |
 | `describe_screen` | Captures the screen on request and describes it — a fresh look, distinct from the ambient watcher |
 | `clipboard` | Reads what was copied, or copies text onto the clipboard |
+| `reminders` | Sets, lists and cancels reminders that FRIDAY delivers on its own, even with nothing open |
 | `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
 | `draft_document` | Generates prose with the local model and saves it as a `.docx` |
 | `launch_application` | Opens desktop applications, with per-OS executable name mapping |
@@ -498,8 +528,9 @@ Stated plainly, because they are the honest state of the project:
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
+- **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs eighty-five pytest cases against the graph, the guard, the confirmation gate, the path allowlist and the server — eighty-four on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and twelve pytest cases against the graph, the guard, the confirmation gate, the path allowlist and the server — one hundred and eleven on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
 - `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.

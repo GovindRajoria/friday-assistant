@@ -513,6 +513,14 @@
 .transcript__entry--confirmation_required { border-left-color: var(--amber); }
 .transcript__entry--confirmation_required .transcript__type { color: var(--amber); }
 
+/* Unprompted, so it is marked as such rather than blending into the replies
+   the operator actually asked for. */
+.transcript__entry--proactive {
+  border-left-color: #c99bff;
+  background: rgba(201, 155, 255, 0.08);
+}
+.transcript__entry--proactive .transcript__type { color: #c99bff; }
+
 .transcript__entry--anomaly,
 .transcript__entry--error {
   border-left-color: var(--red);
