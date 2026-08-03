@@ -52,4 +52,11 @@ export interface FridayApi {
   // Opens a folder picker for FRIDAY_CORE, remembers the choice, and retries
   // the backend. Resolves to the resulting state, unchanged if declined.
   locateBackend(): Promise<BackendReport>;
+
+  // The operator's own biography (config/about_me.md), which the backend
+  // folds into every system prompt. Read and written by main rather than
+  // over HTTP — the server has no authentication, and a write endpoint that
+  // persists text to disk is surface it does not need.
+  readProfile(): Promise<string>;
+  writeProfile(text: string): Promise<boolean>;
 }
