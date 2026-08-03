@@ -84,6 +84,21 @@ DEFAULTS = {
         "model_dir": "yolo11n_openvino_model",
         "confidence": 0.5,
     },
+    "proactive": {
+        # The only part of this assistant that speaks without being spoken
+        # to, so it is opt-in. Everything below is inert while this is False.
+        "enabled": False,
+        # A daily briefing — weather plus headlines — composed in Python from
+        # a fixed read-only skill list, never by a free reasoning turn. See
+        # core/briefing.py for why that distinction is load-bearing.
+        "briefing_enabled": False,
+        "briefing_time": "08:00",
+        # Quiet hours gate the SPEECH, not the event. A briefing at 03:00
+        # should not wake the house; it should still be waiting on screen.
+        # Wraps past midnight, which is the normal case.
+        "quiet_start": "22:00",
+        "quiet_end": "07:00",
+    },
     "filesystem": {
         # skills/os_control/manage_files.py refuses to touch anything outside
         # these directories. This is the layer beneath the confirmation gate,

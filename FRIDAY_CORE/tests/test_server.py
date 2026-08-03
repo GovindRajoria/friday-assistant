@@ -388,3 +388,88 @@ def test_an_unanswered_confirmation_times_out_into_a_denial(monkeypatch, destruc
 
     assert destructive_graph.calls == 0
     assert server_app._busy is False
+
+
+def test_a_proactive_message_waits_while_a_turn_is_running(monkeypatch):
+    """The case no amount of racing a live server proves reliably.
+
+    A reminder must not interleave with the answer the operator is reading.
+    `_busy` is only coherent on the event loop, so the scheduler thread hands
+    over (kind, text) and the drain task — running on the loop — decides.
+    """
+    import asyncio
+
+    async def scenario():
+        queue = asyncio.Queue()
+        monkeypatch.setattr(server_app, "_proactive_events", queue)
+        broadcast = []
+        monkeypatch.setattr(server_app, "_broadcast", lambda event: broadcast.append(event) or asyncio.sleep(0))
+        monkeypatch.setattr(server_app, "_speak_proactive", lambda text: None)
+
+        task = asyncio.create_task(server_app._drain_proactive_events())
+
+        server_app._busy = True
+        queue.put_nowait(("reminder", "Reminder: stand up"))
+        await asyncio.sleep(0.05)
+        during_turn = list(broadcast)
+
+        server_app._busy = False
+        queue.put_nowait(("reminder", "Reminder: stand up"))
+        await asyncio.sleep(0.05)
+        after_turn = list(broadcast)
+
+        task.cancel()
+        return during_turn, after_turn
+
+    during_turn, after_turn = asyncio.run(scenario())
+
+    assert during_turn == []
+    assert [event["type"] for event in after_turn] == ["proactive"]
+    assert after_turn[0]["payload"]["text"] == "Reminder: stand up"
+
+
+def test_a_scheduler_failure_is_reported_even_mid_turn(monkeypatch):
+    # Errors are not deferred. A silent scheduler is exactly the failure mode
+    # vision/watcher.py had to be fixed for — the operator needs to know it
+    # stopped working, whether or not a turn happens to be running.
+    import asyncio
+
+    async def scenario():
+        queue = asyncio.Queue()
+        monkeypatch.setattr(server_app, "_proactive_events", queue)
+        broadcast = []
+        monkeypatch.setattr(server_app, "_broadcast", lambda event: broadcast.append(event) or asyncio.sleep(0))
+        monkeypatch.setattr(server_app, "_speak_proactive", lambda text: None)
+
+        task = asyncio.create_task(server_app._drain_proactive_events())
+        server_app._busy = True
+        queue.put_nowait(("error", "feed unreachable"))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        return list(broadcast)
+
+    broadcast = asyncio.run(scenario())
+
+    assert [event["type"] for event in broadcast] == ["error"]
+    assert "feed unreachable" in broadcast[0]["payload"]["text"]
+
+
+def test_a_proactive_message_never_enters_the_conversation_transcript(monkeypatch):
+    # _memory_buffer is fed into the next prompt. A briefing injected there
+    # becomes something the model believes the operator said to it.
+    import asyncio
+
+    async def scenario():
+        queue = asyncio.Queue()
+        monkeypatch.setattr(server_app, "_proactive_events", queue)
+        monkeypatch.setattr(server_app, "_broadcast", lambda event: asyncio.sleep(0))
+        monkeypatch.setattr(server_app, "_speak_proactive", lambda text: None)
+        task = asyncio.create_task(server_app._drain_proactive_events())
+        server_app._busy = False
+        queue.put_nowait(("briefing", "Good morning, Sir."))
+        await asyncio.sleep(0.05)
+        task.cancel()
+
+    asyncio.run(scenario())
+
+    assert server_app._memory_buffer == []

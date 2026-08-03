@@ -161,6 +161,38 @@ describe("reducer", () => {
     expect(errored.pendingConfirmation).toBeNull();
   });
 
+  it("leaves the orb alone for an unprompted message", () => {
+    // A reminder or briefing is not a turn. Moving the orb would show it as
+    // though the agent had started thinking about something nobody asked.
+    const thinking = reducer(initialState, { kind: "prompt_sent" });
+    const during = reducer(thinking, {
+      kind: "agent_event",
+      event: { type: "proactive", payload: { text: "Reminder: stand up" } },
+      id: "id-9",
+    });
+    expect(during.orb).toBe("thinking");
+
+    const whenIdle = agentEvent({ type: "proactive", payload: { text: "Reminder: stand up" } });
+    expect(whenIdle.orb).toBe("idle");
+    expect(whenIdle.transcript[0].text).toBe("Reminder: stand up");
+  });
+
+  it("does not clear a pending confirmation when something unprompted arrives", () => {
+    // The backend is still blocked waiting on that answer. Clearing the
+    // prompt because a reminder fired would strand the turn with no way to
+    // answer it short of the sixty-second timeout.
+    const asked = agentEvent({
+      type: "confirmation_required",
+      payload: { name: "manage_files", input: {} },
+    });
+    const interrupted = reducer(asked, {
+      kind: "agent_event",
+      event: { type: "proactive", payload: { text: "Reminder: stand up" } },
+      id: "id-10",
+    });
+    expect(interrupted.pendingConfirmation).toEqual({ name: "manage_files", input: {} });
+  });
+
   it("does not mutate the previous state object", () => {
     const before = initialState;
     agentEvent({ type: "thought", payload: { text: "x" } });

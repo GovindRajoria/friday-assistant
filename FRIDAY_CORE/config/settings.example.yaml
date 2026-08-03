@@ -87,6 +87,20 @@ vision:
   model_dir: yolo11n_openvino_model
   confidence: 0.5
 
+proactive:
+  # Reminders and the daily briefing — the only things FRIDAY says without
+  # being asked. Off by default; something that talks at you unprompted
+  # should be a choice.
+  enabled: false
+  # The morning briefing: weather plus headlines, composed from a fixed
+  # read-only set of skills rather than by a free reasoning turn.
+  briefing_enabled: false
+  briefing_time: "08:00"
+  # These silence the voice, not the message — a briefing during quiet hours
+  # still appears in the HUD, it just does not speak. Wraps past midnight.
+  quiet_start: "22:00"
+  quiet_end: "07:00"
+
 filesystem:
   # skills/os_control/manage_files.py (Phase 6) refuses to touch anything
   # outside these directories — resolved with Path.resolve() and checked

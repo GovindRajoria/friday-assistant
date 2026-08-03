@@ -17,7 +17,8 @@ export type AgentEventType =
   | "error"
   | "status"
   | "screen_context"
-  | "confirmation_required";
+  | "confirmation_required"
+  | "proactive";
 
 export interface TextPayload {
   text: string;
@@ -45,7 +46,8 @@ export type AgentEvent =
   | { type: "error"; payload: TextPayload }
   | { type: "status"; payload: TextPayload }
   | { type: "screen_context"; payload: TextPayload }
-  | { type: "confirmation_required"; payload: ActionPayload };
+  | { type: "confirmation_required"; payload: ActionPayload }
+  | { type: "proactive"; payload: TextPayload };
 
 export function isAgentEvent(value: unknown): value is AgentEvent {
   if (typeof value !== "object" || value === null) return false;
