@@ -1,16 +1,14 @@
 // The watcher's latest ambient screen description (Phase 4).
 //
-// This used to render nothing when there was no description, which was right
-// for the one-line status strip it was. It is a whole panel now — one the
-// operator deliberately switched to — and an empty panel reads as broken
-// rather than as "screen awareness is switched off", so the empty case
-// explains itself instead.
+// The empty state is one line, not a paragraph. This sits permanently in a
+// rail rather than behind a tab the operator switched to, and screen
+// awareness is off by default — so the "nothing here" case is what most
+// installs show all the time and it has to stay out of the way.
 export function ScreenContext({ text }: { text: string }) {
   if (!text) {
     return (
       <p className="panel__note">
-        No screen description yet. Continuous screen awareness stays off unless <code>screen.enabled</code> is set in
-        settings, and the first describe pass only runs once the desktop changes.
+        Off — set <code>screen.enabled</code> in settings.
       </p>
     );
   }
@@ -20,10 +18,7 @@ export function ScreenContext({ text }: { text: string }) {
       <div className="vision__frame">
         <p className="vision__text">{text}</p>
       </div>
-      <p className="vision__caveat">
-        Written by a small local vision model. Ambient context, often wrong in detail, and validated by nothing
-        downstream.
-      </p>
+      <p className="vision__caveat">Small local vision model. Ambient context, often wrong in detail.</p>
     </div>
   );
 }
