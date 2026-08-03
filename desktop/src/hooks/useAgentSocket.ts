@@ -86,6 +86,16 @@ export function useAgentSocket() {
     socketRef.current.send(JSON.stringify({ type: "prompt", text: trimmed }));
   }, []);
 
+  // One recorded utterance, sent as a binary frame. Nothing else on this
+  // socket is binary, so the frame needs no envelope of its own — see the
+  // receive loop in server/app.py. The reply comes back as an ordinary
+  // `transcript` event through onmessage above, like everything else.
+  const sendAudio = useCallback((audio: ArrayBuffer) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return false;
+    socketRef.current.send(audio);
+    return true;
+  }, []);
+
   const sendCancel = useCallback(() => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({ type: "cancel" }));
@@ -101,5 +111,5 @@ export function useAgentSocket() {
     dispatch({ kind: "confirmation_resolved" });
   }, []);
 
-  return { state, sendPrompt, sendCancel, sendConfirm };
+  return { state, sendPrompt, sendAudio, sendCancel, sendConfirm };
 }

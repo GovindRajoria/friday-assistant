@@ -59,4 +59,12 @@ export interface FridayApi {
   // persists text to disk is surface it does not need.
   readProfile(): Promise<string>;
   writeProfile(text: string): Promise<boolean>;
+
+  // Fires when the global dictation hotkey is pressed. Registered in main
+  // because that is the only place a shortcut works while another application
+  // has focus — a renderer key handler requires this window to be focused
+  // already, which is precisely the case where clicking the button was never
+  // difficult. The recording itself stays in the renderer, where the
+  // microphone is. Returns an unsubscribe function.
+  onToggleDictation(handler: () => void): () => void;
 }

@@ -14,6 +14,7 @@ describe("reducer", () => {
       transcript: [],
       screenContext: "",
       pendingConfirmation: null,
+      dictation: null,
     });
   });
 
@@ -193,6 +194,49 @@ describe("reducer", () => {
     expect(interrupted.pendingConfirmation).toEqual({ name: "manage_files", input: {} });
   });
 
+  it("offers a heard sentence for review instead of starting a turn", () => {
+    const thinking = reducer(initialState, { kind: "prompt_sent" });
+    const heard = reducer(thinking, {
+      kind: "agent_event",
+      event: { type: "transcript", payload: { text: "what is the weather" } },
+      id: "id-4",
+    });
+    // No turn has begun — the sentence is sitting in the prompt box.
+    expect(heard.orb).toBe("thinking");
+    expect(heard.dictation).toEqual({ id: "id-4", text: "what is the weather" });
+    // And it is in the log, so a misheard question can be found afterwards.
+    expect(heard.transcript[0].text).toBe("what is the weather");
+  });
+
+  it("registers the same sentence heard twice as two dictations", () => {
+    // The id is carried alongside the text for exactly this: comparing on
+    // text alone would swallow the second one, and the prompt box would sit
+    // there unchanged looking like the microphone had failed.
+    const first = agentEvent({ type: "transcript", payload: { text: "read the news" } });
+    const second = reducer(first, {
+      kind: "agent_event",
+      event: { type: "transcript", payload: { text: "read the news" } },
+      id: "id-2",
+    });
+    expect(first.dictation).toEqual({ id: "id-1", text: "read the news" });
+    expect(second.dictation).toEqual({ id: "id-2", text: "read the news" });
+  });
+
+  it("does not clear a pending confirmation when something is heard", () => {
+    // Same reasoning as the proactive case: the backend is still blocked on
+    // that answer, and dictating a sentence is not answering it.
+    const asked = agentEvent({
+      type: "confirmation_required",
+      payload: { name: "manage_files", input: {} },
+    });
+    const heard = reducer(asked, {
+      kind: "agent_event",
+      event: { type: "transcript", payload: { text: "no, leave it alone" } },
+      id: "id-5",
+    });
+    expect(heard.pendingConfirmation).toEqual({ name: "manage_files", input: {} });
+  });
+
   it("does not mutate the previous state object", () => {
     const before = initialState;
     agentEvent({ type: "thought", payload: { text: "x" } });
@@ -202,6 +246,7 @@ describe("reducer", () => {
       transcript: [],
       screenContext: "",
       pendingConfirmation: null,
+      dictation: null,
     });
   });
 });

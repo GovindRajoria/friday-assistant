@@ -6,6 +6,15 @@ A voice-driven desktop assistant that runs entirely on local hardware. Speech re
 
 The interesting part is not the voice interface; it is the reasoning loop. FRIDAY runs a **LangGraph state machine** on top of a local Llama 3.1 via Ollama: every decision is structured output against a JSON schema, not parsed free text, so it can chain several tools together to answer one request — search the web, do arithmetic internally, write the result to a document, then commit a note to long-term memory — deciding each step from the outcome of the last one, with a real bound on how long a chain can run.
 
+The graph is also where the safety properties live. Anything destructive routes
+through a node that shows a human the exact call and waits, and denies by
+default. That is an edge in a state machine, not a sentence in a prompt asking
+the model to be careful.
+
+It also knows how it is built: asked how it works, it reads
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and answers from the file rather
+than from whatever the model remembers about assistants in general.
+
 Built May 2026.
 
 ---
@@ -14,10 +23,14 @@ Built May 2026.
 
 ```mermaid
 flowchart LR
-  mic(["microphone"]) --> stt["faster-whisper<br/>wake word + STT"]
+  mic(["microphone<br/>console"]) --> stt["faster-whisper<br/>wake word + STT"]
+  hud(["microphone<br/>HUD — Speak button"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
+  rec --> stt2["faster-whisper<br/>same model, no wake word"]
+  stt2 --> box["prompt box<br/>operator reads it and sends"]
   kbd(["keypress"]) --> typed["typed input"]
 
   stt --> reason
+  box --> reason
   typed --> reason
 
   subgraph graph["core/graph.py — LangGraph state machine"]
@@ -50,6 +63,38 @@ Everything in that diagram runs on the machine it is installed on. No audio,
 frame, or transcript is sent anywhere.
 
 ### The reasoning loop
+
+**What LangGraph is doing here.** The loop it replaced was a hand-rolled ReAct
+cycle: call the model, regex an `Action:` line out of the reply, run the tool,
+paste the result back into a string, call the model again. That works until it
+does not, and the ways it fails are all silent — a reworded reply drops the
+tool call, a chain has no bound because the counter lives in the wrong
+function, and nothing about it can be tested without a model.
+
+LangGraph supplies four things that were missing:
+
+- **An explicit graph.** Nodes are named (`reason`, `confirm`, `act`,
+  `anomaly_guard`, `nudge`, `abort`) and the edges between them are ordinary
+  Python predicates over the state. "Destructive actions need sign-off first"
+  becomes a conditional edge into `confirm`, not a rule the prompt asks the
+  model to respect. Every safety property in this project is an edge or a node,
+  and that is the whole reason for the migration.
+- **One typed state object.** `core/state.py:AgentState` is what flows between
+  nodes — the transcript, the chosen action, the step count, the latched
+  anomaly flag. There is one place where loop state lives, so `steps` can
+  actually bound the chain.
+- **A stream of updates.** `graph.stream(stream_mode="updates")` yields each
+  node's contribution as it finishes, which is what the WebSocket forwards to
+  the HUD. Watching the assistant think is a property of the graph, not
+  something bolted on afterwards.
+- **Testability without a model.** Because nodes are functions over state, the
+  routing tests build the graph against fake skills and a mocked model call and
+  assert which node ran. Roughly half this project's tests are only possible
+  because of that.
+
+What LangGraph is *not* doing: it holds no memory, does no retrieval, and
+makes no decisions. The model chooses; the graph decides what is allowed to
+happen next.
 
 `core/registry.py:build_action_schema` derives a JSON Schema from every loaded skill's manifest — `action` is an enum of the loaded skill names plus the sentinel `"none"`, and `thought`, `action`, `action_input`, and `final_answer` are all required. `core/nodes/reason.py` sends that schema to Ollama as the `format` parameter and gets back structured JSON instead of free text, so `core/graph.py`'s `route_after_reason` reads `decision["action"]` directly rather than pattern-matching an `Action:` line. `core/nodes/act.py` executes the chosen skill and the result becomes the next `Observation` in the transcript; the graph loops back to `reason` (through `anomaly_guard` first, if the tool was `scan_environment`) until the model sets `action` to `"none"` and gives its answer in `final_answer`.
 
@@ -104,8 +149,89 @@ the interrupt flag is global, so two concurrent turns would corrupt both.
 Speech can be turned off with `server.speak: false` while developing against
 the socket.
 
-**Voice input is not wired into the server.** The microphone stays with the
-console entry point; the socket carries typed prompts only.
+A binary frame on the same socket is a recorded utterance — see
+[Talking to it](#talking-to-it) below. It is the only thing that ever sends
+binary, so the frame needs no envelope of its own.
+
+### Talking to it
+
+Two ways in, one recogniser.
+
+The console entry point opens the microphone itself and waits for the wake
+word. The desktop window records with the browser's `MediaRecorder` when the
+**Speak** button or **Ctrl+Shift+Space** is pressed, and sends the WebM/Opus
+blob down the WebSocket it already has open; `core/transcriber.py` decodes and
+transcribes it with the same faster-whisper model the console uses.
+Chromium's own `SpeechRecognition` API is deliberately not used — it uploads
+audio to Google, which would quietly end the local-first claim.
+
+**What comes back is put in the prompt box and left there.** It is not run. A
+mishearing that goes straight into the graph is a mishearing that can reach a
+skill which deletes files; recognition being good is why that is rare, and the
+review step is why it does not matter when it happens. Correct the word, press
+Enter.
+
+**The model was chosen by measurement.** On this machine — CPU, `int8`, weights
+already downloaded, an 8.58-second utterance:
+
+| model | load | transcribe | × realtime |
+|---|---|---|---|
+| `base.en` | 0.8s | 0.77s | 0.09 |
+| **`small.en`** (default) | 1.3s | 2.08s | **0.24** |
+| `medium.en` | 3.3s | 8.39s | 0.98 |
+| `large-v3-turbo` | ~30s | 11.75s | 1.37 |
+| `distil-large-v3` | ~30s | 12.06s | 1.41 |
+
+Push-to-talk means you wait for that before anything happens at all, so
+anything approaching realtime is unusable however accurate it is — which rules
+out all three large models on CPU here. `small.en` is a quarter of realtime and
+clearly better than `base.en` on accented speech, which is the case that
+actually matters.
+
+Those are latency numbers on synthesised speech. They settle the model choice
+and say nothing about accuracy on *your* voice, so the benchmark ships:
+
+```bash
+cd FRIDAY_CORE && python benchmarks/stt_models.py --record
+```
+
+It records you reading one sentence and prints every candidate's transcript
+side by side. Three settings follow from what you see: `audio.stt_model`,
+`audio.stt_vocabulary` (proper nouns to bias toward — the assistant's name,
+yours and your location are added automatically), and `audio.stt_download_root`
+if the drive holding your home directory is tight.
+
+The model is loaded once, at startup, on a worker thread. Loading it per
+utterance would make the button feel broken regardless of which one was picked,
+and `/health` must stay instant because the window will not appear until it
+answers.
+
+### Knowing how it works
+
+Ask FRIDAY how it works and it answers from
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), not from memory.
+`skills/utility/explain_architecture.py` reads that file at runtime, resolves
+the topic to a `##` section, and returns it verbatim. The skill is marked
+`terminal`, so the section is the answer and the turn ends there.
+
+This is not politeness about sourcing. Asked what LangGraph is used for, the
+model's own reasoning step offered *"a graph-based natural language processing
+library that I use to represent and reason about complex relationships between
+concepts"* — fluent, confident, and wrong in every particular. The skill
+returned the real answer and, being terminal, the guess never reached the
+operator as an answer.
+
+The same run showed a second problem worth stating: the `thought` field is
+spoken aloud *before* the tool runs, so a thought that previews an answer
+broadcasts a guess as though it were fact. The system prompt now requires the
+thought to state the plan and nothing else. Re-run afterwards, it said *"I will
+call explain_architecture with topic 'LangGraph'"* — and the turn dropped from
+16.3s to 3.8s, because there was no essay to generate first.
+
+Adding a `##` section to `docs/ARCHITECTURE.md` adds a topic with no code
+change. A test asserts every topic advertised in the manifest exists as a
+heading, so renaming one fails a test rather than silently answering the wrong
+question.
 
 ### Continuous screen awareness
 
@@ -233,6 +359,19 @@ The prompt box keeps a shell-style history on the up and down arrows, and its
 button becomes **Stop** only while a turn is actually in flight — cancelling
 between turns does nothing, because the backend resets the interrupt flag at
 the start of each one.
+
+**Speak** records a request; **Ctrl+Shift+Space** does the same from anywhere,
+since needing to find and focus the window first defeats the point. The
+microphone is acquired per recording and released on stop rather than held open
+for the life of the window — that costs a couple of hundred milliseconds, shown
+honestly as an *Opening* state so nobody starts talking into a microphone that
+is not live yet, and it keeps the operating system's "in use" indicator
+truthful. Recording is a toggle rather than a hold, because a global shortcut
+fires on press and has no release event, and one mental model is better than
+two; a forgotten toggle stops itself after 45 seconds. Electron's permission
+handler is set explicitly to allow audio capture and refuse everything else —
+without one, Electron grants every permission a page asks for, camera
+included.
 
 **It attaches rather than assumes ownership.** On launch it probes `/health`
 first; if something already answers on 8756 it attaches and will not stop that
@@ -402,7 +541,8 @@ def setup():
 | `media_control` | System volume and playback control (Windows) |
 | `system_check` | CPU and RAM utilisation |
 | `log_fleet_market_data` | Appends structured rows to a CSV ledger |
-| `core_identity` | Answers "who are you" without burning a reasoning step |
+| `core_identity` | Answers "who are you" from the skills actually loaded, without burning a reasoning step |
+| `explain_architecture` | Answers "how do you work" from `docs/ARCHITECTURE.md`, verbatim, rather than from the model's idea of how assistants work |
 | `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
 | `window_control` | Lists, focuses, minimises and maximises desktop windows through `user32` |
 | `send_keys` | Types text or presses a hotkey combination — **destructive**, confirmed |
@@ -485,7 +625,8 @@ FRIDAY_CORE/
 │   │   ├── act.py           Skill dispatch + observation capture
 │   │   └── anomaly_guard.py Deterministic mute rule, enforced after every scan
 │   ├── config.py            Settings loader with layered fallbacks
-│   ├── listener.py          faster-whisper STT + wake word + typed-input fallback
+│   ├── listener.py          faster-whisper STT + wake word + typed-input fallback (console)
+│   ├── transcriber.py       The loaded STT model the HUD's microphone goes through
 │   ├── speaker.py           pyttsx3 TTS
 │   └── interrupt_handler.py Global kill-switch listener
 ├── server/
@@ -496,7 +637,7 @@ FRIDAY_CORE/
 │   ├── watcher.py           Background capture loop; skips a cycle while a turn runs
 │   └── describers/          Describer protocol: OllamaVLM now, OpenVINO later
 ├── skills/                  Auto-discovered capabilities, grouped by domain
-├── benchmarks/              YOLO11 / OpenVINO export and latency measurement
+├── benchmarks/              YOLO11 / OpenVINO export, and stt_models.py for the STT comparison
 ├── tools/
 │   └── check_manifests.py   Static manifest validation; what CI runs
 ├── tests/                   pytest — graph routing, the anomaly guard, the step bound, the server
@@ -512,11 +653,14 @@ desktop/
 └── src/
     ├── reducer.ts           Pure event → HUD state; unit-tested without a socket
     ├── hooks/useAgentSocket.ts  Socket, reconnect, dispatch into the reducer
+    ├── hooks/useMicrophone.ts   Push-to-talk capture; releases the mic on stop
     ├── events.ts            Event-type union, gated against server/events.py
-    └── components/          Orb, Transcript, PromptInput
+    └── components/          Reactor, Transcript, PromptInput, MicButton
 ```
 
-Design decisions and the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
+How the whole thing fits together, in one page: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+— which is also the file FRIDAY itself reads when asked. Design decisions and
+the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 
 ---
 
@@ -526,11 +670,12 @@ Stated plainly, because they are the honest state of the project:
 
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
-- Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
+- **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
+- **The HUD's microphone has not been verified by a human speaking into it.** The server half is: a real WebM/Opus blob sent over the socket to the live backend came back correctly transcribed in 3.6s, and no turn started off it. The renderer half — `getUserMedia`, `MediaRecorder`, the permission prompt, the global hotkey — is covered by no automated test and was not exercised by voice. Press the button and say something; that is the only check that counts.
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
 - **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and twelve pytest cases against the graph, the guard, the confirmation gate, the path allowlist and the server — one hundred and eleven on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and twenty-seven pytest cases against the graph, the guard, the confirmation gate, the path allowlist, the transcription path and the server — one hundred and twenty-six on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
 - `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.

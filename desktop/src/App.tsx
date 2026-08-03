@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmationPrompt } from "./components/ConfirmationPrompt";
+import { MicButton } from "./components/MicButton";
 import { ProfileEditor } from "./components/ProfileEditor";
 import { PromptInput } from "./components/PromptInput";
 import { Reactor } from "./components/Reactor";
@@ -10,11 +11,13 @@ import { TitleBar } from "./components/TitleBar";
 import { Transcript } from "./components/Transcript";
 import { useAgentSocket } from "./hooks/useAgentSocket";
 import { useHealth } from "./hooks/useHealth";
+import { useMicrophone } from "./hooks/useMicrophone";
 import "./App.css";
 
 export function App() {
-  const { state, sendPrompt, sendCancel, sendConfirm } = useAgentSocket();
+  const { state, sendPrompt, sendAudio, sendCancel, sendConfirm } = useAgentSocket();
   const { health, refresh: refreshHealth } = useHealth();
+  const { micState, startRecording, stopRecording } = useMicrophone(sendAudio);
   // Whether the biography editor is open is a view preference, not
   // something the backend said, so it stays out of the reducer.
   const [editingProfile, setEditingProfile] = useState(false);
@@ -27,6 +30,18 @@ export function App() {
     [state.transcript],
   );
 
+  const toggleRecording = useCallback(() => {
+    if (micState.kind === "recording" || micState.kind === "opening") stopRecording();
+    else startRecording();
+  }, [micState.kind, startRecording, stopRecording]);
+
+  // The global hotkey is registered by the main process — a renderer key
+  // handler only fires when this window already has focus, which is the one
+  // case where reaching for the button was never the problem. Main forwards
+  // the press here; the recording itself stays in the renderer, because that
+  // is where the microphone is.
+  useEffect(() => window.friday?.onToggleDictation?.(toggleRecording), [toggleRecording]);
+
   return (
     <div className="hud">
       <span className="hud__scan" aria-hidden="true" />
@@ -38,7 +53,10 @@ export function App() {
           once and nothing has to be switched to. */}
       <main className="hud__body">
         <aside className="rail rail--left">
-          <Reactor state={state.orb} connected={state.connected} />
+          {/* Recording is a local fact about this window, not something the
+              backend reported, so it is passed in beside the orb state rather
+              than folded into the reducer. */}
+          <Reactor state={state.orb} connected={state.connected} listening={micState.kind === "recording"} />
           <StatusBar connected={state.connected} health={health} turns={turns} events={state.transcript.length} />
         </aside>
 
@@ -74,7 +92,15 @@ export function App() {
           onCancel={sendCancel}
           disabled={!state.connected}
           busy={state.orb === "thinking"}
-        />
+          dictation={state.dictation}
+        >
+          <MicButton
+            state={micState}
+            onStart={startRecording}
+            onStop={stopRecording}
+            disabled={!state.connected}
+          />
+        </PromptInput>
       </footer>
     </div>
   );

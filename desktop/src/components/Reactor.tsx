@@ -11,13 +11,29 @@ const LABEL: Record<OrbState, string> = {
 // arcs can be described as stroke patterns and spun with one CSS rotation
 // each instead of a stack of masked circles. No animation library — every
 // motion here is a keyframe in App.css.
-export function Reactor({ state, connected }: { state: OrbState; connected: boolean }) {
+export function Reactor({
+  state,
+  connected,
+  listening,
+}: {
+  state: OrbState;
+  connected: boolean;
+  // The microphone is open in this window. Not an OrbState: nothing on the
+  // socket reports it, and the reducer is a projection of what arrived over
+  // the socket. It also has to be able to show while a turn is still
+  // reasoning, since dictating the next request during an answer is allowed.
+  listening: boolean;
+}) {
   // Carried over from the component this replaces, and it is behaviour
   // rather than styling: a disconnected socket reads as a fault regardless
   // of whatever the reducer last held. The label must never claim the agent
   // is thinking or speaking when nothing is listening to it.
-  const label = connected ? LABEL[state] : "Link down";
-  const visualState = connected ? state : "error";
+  //
+  // Recording outranks both, because it is the one state where something is
+  // being captured off the operator's microphone. That should never be
+  // obscured by a label about what the model is doing.
+  const label = !connected ? "Link down" : listening ? "Listening" : LABEL[state];
+  const visualState = !connected ? "error" : listening ? "listening" : state;
 
   return (
     <div className={`reactor reactor--${visualState}`} role="status" aria-live="polite">

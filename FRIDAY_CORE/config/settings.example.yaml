@@ -79,6 +79,34 @@ audio:
   phrase_time_limit: 10
   speech_rate: 175
 
+  # Speech recognition, shared by the console listener and the microphone
+  # button in the desktop HUD.
+  #
+  # Measured on the development machine over an 8.58s utterance (CPU, int8,
+  # model already downloaded): base.en 0.77s, small.en 2.08s, medium.en
+  # 8.39s, large-v3-turbo 11.75s, distil-large-v3 12.06s. Push-to-talk means
+  # you wait for this before anything happens, so anything approaching
+  # realtime is unusable regardless of how accurate it is. Re-run the numbers
+  # on your own machine and, better, your own voice:
+  #   python benchmarks/stt_models.py --record
+  stt_enabled: true
+  stt_model: small.en
+  stt_device: cpu
+  stt_compute_type: int8
+  # Where the weights are cached. null = huggingface_hub's default, under
+  # your home directory. Point it elsewhere if that drive is tight — a large
+  # model is about 1.5 GB.
+  stt_download_root: null
+  # null = detect. The ".en" models are English-only and ignore this; set it
+  # for a multilingual model so a strong accent cannot make it switch
+  # language halfway through a sentence.
+  stt_language: null
+  # Proper nouns to bias recognition toward — colleagues, product names,
+  # anything a general English model keeps mangling. The assistant's name,
+  # your name and your location are included automatically. Keep it short:
+  # a long list starts leaking its own words into quiet recordings.
+  stt_vocabulary: ""
+
 vision:
   # OpenCV camera index. 0 is the default built-in webcam.
   camera_index: 0

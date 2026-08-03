@@ -19,6 +19,7 @@ const SHORT_LABEL: Partial<Record<AgentEventType, string>> = {
   screen_context: "VIS",
   confirmation_required: "ASK",
   proactive: "PRO",
+  transcript: "YOU",
 };
 
 export function Transcript({ entries }: { entries: TranscriptEntry[] }) {
