@@ -360,7 +360,8 @@ def setup():
 | Skill | What it does |
 |---|---|
 | `scan_environment` | Captures a webcam frame and runs YOLO11 object detection through OpenVINO |
-| `web_search` | Scrapes DuckDuckGo Lite and has the model extract the factual answer |
+| `web_search` | Looks a fact up across three keyless APIs — DuckDuckGo Instant Answer, MediaWiki, Google News — and has the model extract the answer |
+| `read_news` | Current headlines from Google News RSS, general or by topic, for the model to summarise |
 | `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
 | `draft_document` | Generates prose with the local model and saves it as a `.docx` |
 | `launch_application` | Opens desktop applications, with per-OS executable name mapping |
@@ -492,6 +493,8 @@ Stated plainly, because they are the honest state of the project:
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
+- **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
+- **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
 - **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs fifty-seven pytest cases against the graph, the guard, the confirmation gate, the path allowlist and the server — fifty-six on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.

@@ -23,4 +23,9 @@ class AgentState(TypedDict, total=False):
     detections: dict[str, int]     # structured output of the last scan
     anomaly_active: bool           # latched by the guard, cleared only by "exactly 1 person"
     screen_context: str            # ambient VLM description (Phase 4)
+    # Identity of the tool call `act` most recently executed, as
+    # "name:{sorted json params}". Only used to notice that the model has
+    # re-proposed the call it just made, which it does — a single "summarise
+    # today's news" fetched the same feed three times before answering.
+    last_call: str
     action_approved: bool          # set by core/nodes/confirm.py; read by route_after_confirm (Phase 6)

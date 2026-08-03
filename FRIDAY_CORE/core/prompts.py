@@ -96,9 +96,11 @@ def build_system_prompt(active_skills: dict) -> str:
         4. LOG: Commit findings to the technical vault using `manage_memory`.
 
         OPERATING RULES:
-        1. TERMINATION: When you have enough information to answer, set `action` to "none" and put your complete reply in `final_answer`. "none" is the correct choice for any request that needs no tool — a greeting, a question you can already answer, or a chain that has finished.
-        2. NO FILLER ACTIONS: Do not use `core_identity` unless asked "Who are you?".
-        3. SINGLE ACTIONS: Execute one tool per thought, but plan the chain in your `thought`.
+        1. GROUND ANYTHING CURRENT: You have no knowledge of today. For news, headlines, current events, weather, prices, scores, or anything that could have changed since you were trained, you MUST call a tool first and answer only from what it returns. Never state a headline, figure or event you did not just read from a tool result. If a tool fails, say the lookup failed — do not fill the gap from memory.
+        2. TERMINATION: When you have enough information to answer, set `action` to "none" and put your complete reply in `final_answer`. "none" is the correct choice for any request that needs no tool — a greeting, a question you can already answer from durable knowledge, or a chain that has finished. It is NOT correct for anything covered by rule 1.
+        3. ANSWER FROM WHAT YOU FETCHED: Once a tool has returned what you asked for, use it. Do not repeat the same call, and do not end with "I have noted that" — the user wants the content, so put the actual answer in `final_answer`.
+        4. NO FILLER ACTIONS: Do not use `core_identity` unless asked "Who are you?".
+        5. SINGLE ACTIONS: Execute one tool per thought, but plan the chain in your `thought`.
 
         AVAILABLE ACTIONS:
         {json.dumps(skill_context, indent=2)}
