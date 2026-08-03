@@ -142,19 +142,51 @@ async function ensureBackend(): Promise<void> {
   }
 }
 
+// An ordinary desktop window, not a floating overlay.
+//
+// It was a transparent, always-on-top, click-through panel, and that design
+// failed on the operator's machine in three connected ways. The window starts
+// click-through and only becomes interactive on a `mouseenter` in the
+// renderer — but Electron hands mouse events over a `-webkit-app-region:
+// drag` surface to the OS instead of to the page, so a pointer crossing the
+// title bar makes those enter/leave events unreliable and the flag latches.
+// Latched on, nothing in the window can be dragged or clicked. Latched off,
+// an always-on-top window silently swallows every click inside its rectangle,
+// so the desktop underneath becomes unusable while FRIDAY is running. There
+// were also no window controls at all, because a frameless overlay was never
+// meant to be minimised.
+//
+// So: opaque, resizable, movable, with real controls, and always-on-top
+// demoted to a button the operator presses when they actually want it.
 function createWindow(): BrowserWindow {
   return new BrowserWindow({
-    width: 440,
-    height: 720,
+    width: 1180,
+    height: 760,
+    minWidth: 940,
+    minHeight: 620,
+    // Still frameless — the title bar is drawn in the renderer so it matches
+    // the rest of the instrument panel. What changed is that it now carries
+    // minimise, maximise and close, and its drag region is not competing
+    // with a click-through flag.
     frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    // transparent + resizable is unreliable on Windows (resize handles
-    // fight the transparency compositing) — fixed size sidesteps it.
-    resizable: false,
-    // Not shown until ensureBackend() resolves, one way or the other —
-    // never a blank transparent window sitting on screen while the model
-    // and nine skills finish loading.
+    // transparent: false is what makes resizable: true reliable here. The two
+    // fight on Windows, which is why the overlay was a fixed size; dropping
+    // transparency is what buys back resizing and dragging.
+    transparent: false,
+    resizable: true,
+    maximizable: true,
+    // Opt-in, via the pin button in the title bar. Defaulting a window that
+    // covers a third of the screen to always-on-top is the behaviour that
+    // made the machine unusable.
+    alwaysOnTop: false,
+    // Matches the chassis so there is no white flash between the window
+    // appearing and the renderer painting. Safe to set now that the window
+    // is not transparent — on a transparent window this was a known source
+    // of compositing glitches.
+    backgroundColor: "#05080c",
+    // Not shown until ensureBackend() resolves, one way or the other — never
+    // an empty window sitting on screen while the model and every skill
+    // finish loading.
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/preload.cjs"),
@@ -163,10 +195,6 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
-  // backgroundColor is deliberately left unset: transparent already
-  // handles it, and setting one (even 'rgba(0,0,0,0)' explicitly) is a
-  // known source of compositing glitches with frameless transparent
-  // windows on Windows.
 }
 
 async function loadRenderer(win: BrowserWindow): Promise<void> {
@@ -182,8 +210,34 @@ async function loadRenderer(win: BrowserWindow): Promise<void> {
   }
 }
 
-ipcMain.on("hud:set-ignore-mouse-events", (event, ignore: boolean, options?: { forward: boolean }) => {
-  BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(Boolean(ignore), options);
+// Window controls, since the frame that would normally provide them is off.
+ipcMain.on("hud:minimize", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+
+ipcMain.on("hud:toggle-maximize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+  // A toggle, not a one-way maximise — otherwise the button strands the
+  // window at full screen with no way back.
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+});
+
+ipcMain.on("hud:close", (event) => {
+  // close(), not app.exit(). The backend kill hangs off `before-quit`,
+  // `window-all-closed` and `process.on('exit')`, and skipping those is how
+  // this project orphaned a server twice already.
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+// Returns the state the window actually ended up in rather than the state
+// that was asked for, so the pin button reflects reality instead of a guess.
+ipcMain.handle("hud:toggle-always-on-top", (event): boolean => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return false;
+  win.setAlwaysOnTop(!win.isAlwaysOnTop());
+  return win.isAlwaysOnTop();
 });
 
 // The HUD's systems panel asks for this on a timer. The throw is deliberate:

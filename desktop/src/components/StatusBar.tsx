@@ -18,20 +18,25 @@ export function StatusBar({
   const skills = health.kind === "ok" ? String(health.skills.length) : "—";
 
   return (
-    <div className="status-bar">
-      <span className={`status-bar__link ${connected ? "" : "status-bar__link--down"}`}>
-        <span className="status-bar__dot" aria-hidden="true" />
-        {connected ? "LINK 127.0.0.1:8756" : "LINK DOWN"}
-      </span>
-      <span className="status-bar__stat" title="Skills reported by GET /health">
-        SKL {skills}
-      </span>
-      <span className="status-bar__stat" title="Turns completed since this window opened">
-        TRN {turns}
-      </span>
-      <span className="status-bar__stat" title="Events received since this window opened">
-        EVT {events}
-      </span>
+    <div className="status">
+      <div className={`status__link ${connected ? "" : "status__link--down"}`}>
+        <span className="status__dot" aria-hidden="true" />
+        <span className="status__link-text">{connected ? "127.0.0.1:8756" : "Link down"}</span>
+      </div>
+      <dl className="status__stats">
+        <div className="status__stat" title="Skills reported by GET /health">
+          <dt>Skills</dt>
+          <dd>{skills}</dd>
+        </div>
+        <div className="status__stat" title="Turns completed since this window opened">
+          <dt>Turns</dt>
+          <dd>{turns}</dd>
+        </div>
+        <div className="status__stat" title="Events received since this window opened">
+          <dt>Events</dt>
+          <dd>{events}</dd>
+        </div>
+      </dl>
     </div>
   );
 }

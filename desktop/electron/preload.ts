@@ -6,8 +6,17 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { FridayApi } from "./api";
 
 const api: FridayApi = {
-  setIgnoreMouseEvents(ignore, options) {
-    ipcRenderer.send("hud:set-ignore-mouse-events", ignore, options);
+  minimize() {
+    ipcRenderer.send("hud:minimize");
+  },
+  toggleMaximize() {
+    ipcRenderer.send("hud:toggle-maximize");
+  },
+  close() {
+    ipcRenderer.send("hud:close");
+  },
+  toggleAlwaysOnTop() {
+    return ipcRenderer.invoke("hud:toggle-always-on-top");
   },
   // invoke/handle, not send/on. Click-through is fire-and-forget and has
   // nothing to return; health does, and copying that channel's shape would

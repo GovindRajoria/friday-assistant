@@ -188,19 +188,29 @@ limitations below.
 
 ### The desktop shell
 
-`desktop/` is an Electron + React + Vite front end for the same server — a
-frameless, transparent, always-on-top window. It is click-through except while
-the pointer is over it, so it can sit on top of other work without swallowing
-clicks.
+`desktop/` is an Electron + React + Vite front end for the same server — an
+ordinary, resizable desktop window with a custom title bar carrying minimise,
+maximise, close and a **pin** button for always-on-top.
 
-The window is a reactor readout, a command line, a status bar, and three
-panels behind tabs:
+**It was a transparent, always-on-top, click-through overlay, and that failed
+on a real machine.** The window began click-through and only became
+interactive on a `mouseenter` in the renderer — but Electron hands mouse
+events over a `-webkit-app-region: drag` surface to the OS rather than to the
+page, so a pointer crossing the title bar made those enter/leave events
+unreliable and the flag latched. Latched on, nothing could be dragged or
+clicked. Latched off, an always-on-top window silently swallowed every click
+inside its rectangle and the desktop underneath became unusable. There were
+also no window controls at all, because a frameless overlay was never meant to
+be minimised. Opaque and ordinary is what fixed all three; always-on-top is
+now a button rather than the default.
 
-| Panel | Shows |
+The layout is three columns, all visible at once rather than behind tabs:
+
+| Region | Shows |
 |---|---|
-| **LOG** | The event stream, one line per event, colour-coded by type. The step-by-step types (`thought`, `action`, `observation`, `status`) can be muted with the chips above it; `answer`, `error` and `anomaly` deliberately cannot, so a filter can never hide the end of a turn. |
-| **SYS** | The skills the backend actually loaded, read from `GET /health` on a fifteen-second poll. |
-| **VIS** | The screen watcher's latest ambient description, when screen awareness is on. |
+| **Left rail** | The reactor — idle, reasoning or fault — plus the socket address, skill count, turns completed and events received. |
+| **Centre** | The event stream, one line per event, colour-coded by type. The step-by-step types (`thought`, `action`, `observation`, `status`) can be muted with the chips above it; `answer`, `error` and `anomaly` deliberately cannot, so a filter can never hide the end of a turn. |
+| **Right rail** | The skills the backend actually loaded, read from `GET /health` on a fifteen-second poll, and the screen watcher's latest ambient description when screen awareness is on. |
 
 A pending destructive action takes over the panel area entirely, listing the
 proposed call one parameter per line — the one moment the HUD asks a human to
@@ -496,9 +506,9 @@ Stated plainly, because they are the honest state of the project:
 - Screen descriptions come from a small model and are frequently wrong in detail. They are ambient context injected into the prompt, not a source of truth, and nothing downstream validates them.
 - Screen capture is local and never leaves the machine, but it is still a capture of whatever is on screen — it is off by default and worth leaving off while handling anything sensitive.
 - The packaged executable is unsigned, and it contains only the shell. It cannot run without a Python backend already installed on the machine, located through FRIDAY_CORE_DIR or placed beside the executable.
-- The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate, the process kill and the click-through toggling are verified by hand. Window dragging in particular resists automated checking: injected mouse input does not drive a Windows caption drag, so `-webkit-app-region` behaviour can only be confirmed by dragging the thing.
+- The HUD is unit-tested at the reducer only. CI typechecks and builds the shell and runs the reducer tests, but nothing exercises Electron itself — the window, the health gate and the process kill are verified by hand.
 - **The first answer to a confirmation wins, from any connected client.** The pending confirmation is one module-level object on a single-flight server, and its wait returns the moment anything resolves it; a second answer arriving afterwards sets a flag nothing is waiting on and is discarded. So an approval cannot be taken back by a denial sent a moment later, and a HUD left open on a shared screen is a client that can answer for you. Combined with the point below, one stray click both approves the action and makes any subsequent denial a no-op.
-- The confirmation prompt is a normal button on a floating, always-on-top window that toggles its own click-through. Nothing distinguishes a considered approval from an accidental click. The sixty-second timeout is the only thing standing between an unattended HUD and a request that waits forever — it denies, but it denies quietly.
+- The confirmation prompt is a normal button. Nothing distinguishes a considered approval from an accidental click, and during development a stray click on it approved three deletions that the driving script had not asked for. The sixty-second timeout is the only thing standing between an unattended HUD and a request that waits forever — it denies, but it denies quietly.
 - `test_suite.txt` drives an end-to-end batch runner (`run the test suite`) that logs model output for manual review — useful for regression-spotting, not a substitute for unit tests.
 - Structured output narrows how a hallucinated tool call can happen, but it does not eliminate model error generally — `action_input` is an open `object` with no per-skill parameter schema, so a wrong or missing argument inside a valid action is still possible and is not validated before `act_node` calls `skill.execute()`.
 

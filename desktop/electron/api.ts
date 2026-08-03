@@ -9,10 +9,15 @@ export interface HealthReport {
 }
 
 export interface FridayApi {
-  // The renderer cannot make its own window click-through — only the
-  // BrowserWindow that owns it can. This is why the toggle is a bridged
-  // call into main rather than something the renderer does directly.
-  setIgnoreMouseEvents(ignore: boolean, options?: { forward: boolean }): void;
+  // The window is frameless, so the controls a frame would have provided are
+  // drawn in the renderer and bridged back to the BrowserWindow that owns it.
+  minimize(): void;
+  toggleMaximize(): void;
+  close(): void;
+
+  // Resolves to the state the window actually ended up in, not the state
+  // that was requested, so the pin button can render the truth.
+  toggleAlwaysOnTop(): Promise<boolean>;
 
   // GET /health, performed in the main process rather than by the renderer.
   //
