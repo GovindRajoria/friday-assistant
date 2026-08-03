@@ -81,5 +81,15 @@ export function useAgentSocket() {
     socketRef.current.send(JSON.stringify({ type: "cancel" }));
   }, []);
 
-  return { state, sendPrompt, sendCancel };
+  // Answers a pending confirmation_required (Phase 6). Dispatched locally
+  // right away rather than waiting for a server event to clear it — the
+  // backend has no "confirmation acknowledged" event, only whatever the
+  // turn does next, so the button has to update the HUD itself.
+  const sendConfirm = useCallback((approved: boolean) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({ type: "confirm", approved }));
+    dispatch({ kind: "confirmation_resolved" });
+  }, []);
+
+  return { state, sendPrompt, sendCancel, sendConfirm };
 }

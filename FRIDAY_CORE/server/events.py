@@ -18,8 +18,17 @@ ANOMALY = "anomaly"
 ERROR = "error"
 STATUS = "status"
 SCREEN_CONTEXT = "screen_context"
+# Phase 6: the confirmation gate. Emitted by server/app.py's `confirm`
+# callable (core/nodes/confirm.py calls it synchronously from the turn's
+# worker thread) whenever a destructive skill is chosen. The payload shape
+# matches ACTION's ({"name": ..., "input": ...}) rather than a plain
+# TextPayload, since the HUD needs the actual proposed call to show a human,
+# not just a sentence about it.
+CONFIRMATION_REQUIRED = "confirmation_required"
 
-ALL_TYPES = frozenset({THOUGHT, ACTION, OBSERVATION, ANSWER, ANOMALY, ERROR, STATUS, SCREEN_CONTEXT})
+ALL_TYPES = frozenset({
+    THOUGHT, ACTION, OBSERVATION, ANSWER, ANOMALY, ERROR, STATUS, SCREEN_CONTEXT, CONFIRMATION_REQUIRED,
+})
 
 
 def envelope(event_type: str, payload: dict) -> dict:

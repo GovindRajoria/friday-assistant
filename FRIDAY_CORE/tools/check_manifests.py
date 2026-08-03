@@ -33,7 +33,11 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 MIN_DESCRIPTION_CHARS = 40
 
 REQUIRED_KEYS = {"name", "description"}
-ALLOWED_KEYS = REQUIRED_KEYS | {"parameters"}
+# "destructive" is Phase 6: a skill that can delete or overwrite something, or
+# synthesise input, sets it so core/graph.py routes to the confirmation node
+# instead of straight to `act`. Optional and defaulting to falsy — the nine
+# skills that predate this key declare nothing and must keep passing unchanged.
+ALLOWED_KEYS = REQUIRED_KEYS | {"parameters", "destructive"}
 
 
 class Problem(Exception):
@@ -113,6 +117,13 @@ def validate(manifest: dict) -> None:
         if not isinstance(parameter, str) or not parameter.isidentifier():
             raise Problem(f"parameter {parameter!r} must be an identifier string")
 
+    if "destructive" in manifest and not isinstance(manifest["destructive"], bool):
+        raise Problem(
+            f"destructive must be a bool, got {type(manifest['destructive']).__name__} — "
+            "core/graph.py checks it with a plain truthiness test, so a stray string "
+            "like 'true' would route as truthy no matter what it says"
+        )
+
 
 def main() -> None:
     if not SKILLS_DIR.is_dir():
@@ -154,10 +165,11 @@ def main() -> None:
             )
             continue
         seen[name] = relative
-        rows.append((name, ", ".join(manifest.get("parameters", [])) or "—", relative))
+        marker = "DESTRUCTIVE" if manifest.get("destructive") else "—"
+        rows.append((name, ", ".join(manifest.get("parameters", [])) or "—", marker, relative))
 
-    for name, parameters, relative in rows:
-        print(f"OK    {name:<22} {parameters:<28} {relative}")
+    for name, parameters, marker, relative in rows:
+        print(f"OK    {name:<22} {parameters:<28} {marker:<12} {relative}")
 
     if errors:
         print()

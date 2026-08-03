@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { ConfirmationPrompt } from "./components/ConfirmationPrompt";
 import { Orb } from "./components/Orb";
 import { PromptInput } from "./components/PromptInput";
 import { ScreenContext } from "./components/ScreenContext";
@@ -7,7 +8,7 @@ import { useAgentSocket } from "./hooks/useAgentSocket";
 import "./App.css";
 
 export function App() {
-  const { state, sendPrompt, sendCancel } = useAgentSocket();
+  const { state, sendPrompt, sendCancel, sendConfirm } = useAgentSocket();
 
   // The window starts fully click-through — a frameless, always-on-top HUD
   // that swallowed every click on the desktop underneath it would be
@@ -44,6 +45,11 @@ export function App() {
         <Orb state={state.orb} connected={state.connected} />
         <Transcript entries={state.transcript} />
         <ScreenContext text={state.screenContext} />
+        <ConfirmationPrompt
+          pending={state.pendingConfirmation}
+          onApprove={() => sendConfirm(true)}
+          onDeny={() => sendConfirm(false)}
+        />
         <PromptInput onSubmit={sendPrompt} onCancel={sendCancel} disabled={!state.connected} />
       </div>
     </div>

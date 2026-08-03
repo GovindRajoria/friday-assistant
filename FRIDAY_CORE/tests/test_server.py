@@ -30,6 +30,43 @@ class _EchoSkill:
         return {"status": "success", "message": "echoed"}
 
 
+class _DestructiveEchoSkill:
+    """Same trivial behaviour as _EchoSkill, but declared destructive.
+
+    Nothing here touches the filesystem — the point of these tests is the
+    socket round trip around the gate, not what a real destructive skill
+    does once it is allowed through. `calls` is what proves the gate held.
+    """
+
+    def __init__(self):
+        self.manifest = {
+            "name": "wipe",
+            "description": "a fake destructive skill used only for server tests",
+            "parameters": ["target"],
+            "destructive": True,
+        }
+        self.calls = 0
+
+    def execute(self, params=None):
+        self.calls += 1
+        return {"status": "success", "message": "wiped"}
+
+
+@pytest.fixture
+def destructive_graph(monkeypatch):
+    """Wire the module's graph to a destructive fake, gated by the real callable.
+
+    `server_app.graph` is built once at import time, before any monkeypatch in
+    this file has run, so a test that needs a specific confirm callable has to
+    rebuild it. Passing `server_app._confirm_via_socket` explicitly — rather
+    than relying on the import-time wiring — is what makes the timeout test
+    below able to shorten CONFIRMATION_TIMEOUT_SECONDS and have it matter.
+    """
+    skill = _DestructiveEchoSkill()
+    monkeypatch.setattr(server_app, "graph", build_graph({"wipe": skill}, confirm=server_app._confirm_via_socket))
+    return skill
+
+
 def _decision(action="none", thought="", final_answer="", action_input=None):
     return json.dumps({
         "thought": thought,
@@ -46,11 +83,16 @@ def _reset_server_state():
     server_app._busy = False
     server_app._connections.clear()
     server_app.interrupter.reset()
+    # A resolved confirmation left set would let the next test's destructive
+    # action through without ever blocking — the exact stale-approval case
+    # _PendingConfirmation.reset() exists to prevent at runtime.
+    server_app._pending_confirmation.reset()
     yield
     server_app._memory_buffer.clear()
     server_app._busy = False
     server_app._connections.clear()
     server_app.interrupter.reset()
+    server_app._pending_confirmation.reset()
 
 
 def test_health_returns_ok_and_skills():
@@ -259,3 +301,90 @@ def test_cancel_between_turns_does_not_poison_the_next_prompt(monkeypatch):
 
     assert event["type"] == "answer"
     assert event["payload"]["text"] == "done"
+
+
+def test_destructive_action_asks_over_the_socket_and_approval_lets_it_run(monkeypatch, destructive_graph):
+    responses = iter([
+        _decision(action="wipe", thought="", action_input={"target": "scratch.txt"}),
+        _decision(action="none", thought="", final_answer="wiped it"),
+    ])
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: next(responses))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_json({"type": "prompt", "text": "wipe scratch.txt"})
+
+        # `action` arrives first, before the gate is ever reached. Under
+        # stream_mode="updates" the reason node's update — which is what
+        # carries the chosen action — is emitted the moment that node
+        # finishes, and only then does the graph advance into `confirm`. So
+        # the HUD sees the proposed call twice: once as the ordinary action
+        # line every turn produces, then again as the thing it is being asked
+        # about. Do not "fix" this ordering in a test by reordering the
+        # asserts on the assumption the gate comes first.
+        assert ws.receive_json()["type"] == "action"
+
+        asked = ws.receive_json()
+        # The HUD gets the real proposed call, not a sentence about it — an
+        # operator cannot meaningfully approve what they cannot see.
+        assert asked["type"] == "confirmation_required"
+        assert asked["payload"] == {"name": "wipe", "input": {"target": "scratch.txt"}}
+
+        ws.send_json({"type": "confirm", "approved": True})
+
+        observation = ws.receive_json()
+        assert observation["type"] == "observation"
+        assert observation["payload"]["text"] == "wiped"
+        assert ws.receive_json()["payload"]["text"] == "wiped it"
+
+    assert destructive_graph.calls == 1
+
+
+def test_denial_over_the_socket_stops_the_skill_and_the_turn_still_answers(monkeypatch, destructive_graph):
+    responses = iter([
+        _decision(action="wipe", thought="", action_input={"target": "scratch.txt"}),
+        _decision(action="none", thought="", final_answer="left it alone"),
+    ])
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: next(responses))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_json({"type": "prompt", "text": "wipe scratch.txt"})
+        assert ws.receive_json()["type"] == "action"
+        assert ws.receive_json()["type"] == "confirmation_required"
+
+        ws.send_json({"type": "confirm", "approved": False})
+
+        denial = ws.receive_json()
+        assert denial["type"] == "observation"
+        assert "Confirmation denied for 'wipe'" in denial["payload"]["text"]
+        assert ws.receive_json()["payload"]["text"] == "left it alone"
+
+    assert destructive_graph.calls == 0
+
+
+def test_an_unanswered_confirmation_times_out_into_a_denial(monkeypatch, destructive_graph):
+    # The operator who walks away, or a HUD that closed mid-turn. Without a
+    # timeout the worker thread blocks on the event forever and single-flight
+    # never releases, so the server is wedged for the rest of the process —
+    # which is why the assertion on _busy at the end matters as much as the
+    # denial itself.
+    monkeypatch.setattr(server_app, "CONFIRMATION_TIMEOUT_SECONDS", 0.1)
+
+    responses = iter([
+        _decision(action="wipe", thought="", action_input={"target": "scratch.txt"}),
+        _decision(action="none", thought="", final_answer="nothing was done"),
+    ])
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: next(responses))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_json({"type": "prompt", "text": "wipe scratch.txt"})
+        assert ws.receive_json()["type"] == "action"
+        assert ws.receive_json()["type"] == "confirmation_required"
+
+        # Deliberately answer nothing at all.
+        denial = ws.receive_json()
+        assert denial["type"] == "observation"
+        assert "Confirmation denied for 'wipe'" in denial["payload"]["text"]
+        assert ws.receive_json()["payload"]["text"] == "nothing was done"
+
+    assert destructive_graph.calls == 0
+    assert server_app._busy is False

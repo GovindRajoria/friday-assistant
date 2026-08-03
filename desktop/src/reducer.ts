@@ -6,7 +6,7 @@
 // useAgentSocket owns the side effects (connecting, reconnecting, deciding
 // what id to hand each event) and dispatches into this reducer; nothing in
 // here reaches back out to a socket.
-import type { AgentEvent, AgentEventType } from "./events";
+import type { ActionPayload, AgentEvent, AgentEventType } from "./events";
 
 // "speaking" is declared but never produced by orbForEvent below. The
 // backend has no speech-completion event, so nothing could move the orb out
@@ -28,6 +28,13 @@ export interface HudState {
   // rather than accumulating, so a busy screen does not fill the
   // scrolling transcript with lines nobody asked for.
   screenContext: string;
+  // The destructive action currently awaiting a human answer, or null when
+  // nothing is pending (Phase 6). Cleared on "confirmation_resolved" (the
+  // approve/deny buttons were clicked) and on every terminal event, because
+  // the backend's 60s timeout can end a turn without this client ever
+  // clicking anything — a stale prompt left rendered after that would offer
+  // to approve or deny a question nobody is waiting on anymore.
+  pendingConfirmation: ActionPayload | null;
 }
 
 export const initialState: HudState = {
@@ -35,6 +42,7 @@ export const initialState: HudState = {
   connected: false,
   transcript: [],
   screenContext: "",
+  pendingConfirmation: null,
 };
 
 export type HudAction =
@@ -44,13 +52,19 @@ export type HudAction =
   // `id` is supplied by the caller rather than generated here (e.g. with
   // crypto.randomUUID()) — a reducer that reaches for its own source of
   // entropy is no longer a pure function of (state, action).
-  | { kind: "agent_event"; event: AgentEvent; id: string };
+  | { kind: "agent_event"; event: AgentEvent; id: string }
+  // Dispatched by useAgentSocket.sendConfirm the moment a button is
+  // clicked, independent of any event arriving back over the socket — the
+  // HUD should not keep showing a resolved prompt while waiting for the
+  // network round trip.
+  | { kind: "confirmation_resolved" };
 
-// action's payload shape ({name, input}) differs from every other event
-// type ({text}) — the one discriminated-union case in this file, and the
-// one place a naive `.text` access would render `undefined`.
+// action's and confirmation_required's payload shape ({name, input}) differs
+// from every other event type ({text}) — the one discriminated-union case in
+// this file, and the one place a naive `.text` access would render
+// `undefined`.
 function describe(event: AgentEvent): string {
-  if (event.type === "action") {
+  if (event.type === "action" || event.type === "confirmation_required") {
     return `${event.payload.name}(${JSON.stringify(event.payload.input)})`;
   }
   return event.payload.text;
@@ -61,6 +75,7 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
     case "thought":
     case "action":
     case "observation":
+    case "confirmation_required":
       return "thinking";
     case "answer":
     case "status":
@@ -105,12 +120,24 @@ export function reducer(state: HudState, action: HudAction): HudState {
         type: action.event.type,
         text: describe(action.event),
       };
-      return {
+      const next: HudState = {
         ...state,
         orb: orbForEvent(action.event.type, state.orb),
         transcript: [...state.transcript, entry],
       };
+      if (action.event.type === "confirmation_required") {
+        return { ...next, pendingConfirmation: action.event.payload };
+      }
+      if (action.event.type === "answer" || action.event.type === "error") {
+        // Covers the "server gave up" path: a 60s unanswered confirmation
+        // times out to a denial and the turn moves on to an answer without
+        // this client ever dispatching confirmation_resolved.
+        return { ...next, pendingConfirmation: null };
+      }
+      return next;
     }
+    case "confirmation_resolved":
+      return { ...state, pendingConfirmation: null };
     default:
       return state;
   }

@@ -71,6 +71,45 @@ class _Interrupter:
         self.interrupted = False
 
 
+class _PendingConfirmation:
+    """Bridges the turn's worker thread and the event loop that answers it.
+
+    `core.nodes.confirm.confirm_node` calls the `confirm` callable
+    synchronously, from `asyncio.to_thread`'s worker — a plain thread with no
+    event loop of its own, the same reason `_Interrupter` above is a plain
+    flag rather than an asyncio primitive. threading.Event is what a thread
+    with no loop can actually block on; the WebSocket handler runs on the
+    loop and sets it when a `{"type": "confirm", ...}` message arrives.
+
+    Module-level, not per-turn: the server is single-flight (one turn at a
+    time — see the module docstring), so there is only ever at most one
+    pending confirmation to track.
+    """
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._approved = False
+
+    def reset(self) -> None:
+        # Cleared at the start of every confirmation wait, not just once at
+        # startup — a stale approval left over from resolve() would
+        # otherwise let a later, unrelated destructive action sail through
+        # without ever actually blocking.
+        self._event.clear()
+        self._approved = False
+
+    def resolve(self, approved: bool) -> None:
+        self._approved = approved
+        self._event.set()
+
+    def wait(self, timeout: float) -> bool:
+        # A timed-out wait denies. Without this, an operator who never
+        # answers — the HUD closed, they stepped away — would block this
+        # thread, and therefore single-flight, for the rest of the process.
+        got_answer = self._event.wait(timeout=timeout)
+        return got_answer and self._approved
+
+
 class _SpeechThread:
     """Owns the pyttsx3 engine on one dedicated, long-lived thread.
 
@@ -143,8 +182,41 @@ async def _lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=_lifespan)
 
+# Deny-by-timeout budget for a destructive action nobody answers. 60s is
+# generous for a human actually looking at the HUD and stingy enough that a
+# closed HUD or an absent operator does not wedge single-flight indefinitely.
+# Read as a bare module global inside _confirm_via_socket below, not as a
+# bound default argument — a default is captured once at function-definition
+# time, which would make `monkeypatch.setattr(server_app,
+# "CONFIRMATION_TIMEOUT_SECONDS", ...)` silently no-op in tests.
+CONFIRMATION_TIMEOUT_SECONDS = 60
+
+_pending_confirmation = _PendingConfirmation()
+# Set at the start of every turn in _run_prompt, to that turn's `emit`. The
+# graph is built once, at module scope, long before any turn exists, so the
+# `confirm` callable it holds cannot close over a turn-specific emit
+# directly — this module-level indirection is what lets one graph object
+# serve every turn without knowing anything about turns or sockets itself.
+_current_emit = None
+
+
+def _confirm_via_socket(action: str, action_input: dict, thought: str) -> bool:  # noqa: ARG001 — thought kept for parity with the confirm signature; unused here
+    """The `confirm` callable wired into build_graph for the WebSocket server.
+
+    Runs on the turn's worker thread (core.nodes.confirm calls it
+    synchronously). Surfaces `confirmation_required` to every connected HUD
+    through the current turn's `emit`, then blocks until the WebSocket
+    handler resolves `_pending_confirmation` — from a `{"type": "confirm",
+    "approved": ...}` message — or the timeout above denies it outright.
+    """
+    _pending_confirmation.reset()
+    if _current_emit is not None:
+        _current_emit("confirmation_required", {"name": action, "input": action_input})
+    return _pending_confirmation.wait(CONFIRMATION_TIMEOUT_SECONDS)
+
+
 active_skills = discover_skills()
-graph = build_graph(active_skills)
+graph = build_graph(active_skills, confirm=_confirm_via_socket)
 interrupter = _Interrupter()
 
 # Started by the lifespan handler, not at import. Building it here meant
@@ -291,6 +363,7 @@ async def _run_prompt(text: str) -> str:
     # here, at the start of this turn rather than the end of the last one,
     # is what keeps a stray cancel from also killing the next prompt.
     interrupter.reset()
+    global _current_emit
     loop = asyncio.get_running_loop()
     queued: asyncio.Queue = asyncio.Queue()
 
@@ -319,6 +392,10 @@ async def _run_prompt(text: str) -> str:
     # same way, this just makes the no-watcher case explicit here too.
     screen_context = _watcher.latest_description if _watcher is not None else ""
     _memory_buffer.append(f"User: {text}")
+    # Published before the worker thread starts, so _confirm_via_socket can
+    # reach this turn's emit the moment the graph routes to "confirm" — see
+    # that function's docstring for why this indirection exists at all.
+    _current_emit = emit
     try:
         final_answer = await asyncio.to_thread(
             run_turn, graph, text, _memory_buffer, interrupter, emit, history_length, screen_context,
@@ -346,6 +423,7 @@ async def _run_prompt(text: str) -> str:
         # process.
         queued.put_nowait(None)
         await drain_task
+        _current_emit = None
     return final_answer
 
 
@@ -380,6 +458,15 @@ async def ws_endpoint(websocket: WebSocket):
                 # the turn on its next streamed update. Nothing to send
                 # back — the caller sees the turn end via a "status" event.
                 interrupter.cancel()
+                continue
+            if message_type == "confirm":
+                # Resolves whichever destructive action is currently
+                # blocking the worker thread in _confirm_via_socket. A
+                # confirm arriving with nothing pending (no turn running, or
+                # the turn already timed out) just sets a flag nothing is
+                # waiting on — harmless, and cheaper than tracking whether a
+                # wait is actually in flight.
+                _pending_confirmation.resolve(bool(message.get("approved")))
                 continue
             if message_type != "prompt":
                 continue

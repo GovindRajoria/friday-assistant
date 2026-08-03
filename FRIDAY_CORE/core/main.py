@@ -18,7 +18,7 @@ class FridayCore:
         self.speaker.speak("Initializing core systems.")
 
         self.active_skills = discover_skills()
-        self.graph = build_graph(self.active_skills)
+        self.graph = build_graph(self.active_skills, confirm=self._confirm_on_stdin)
 
         # Short-term conversational memory, carried across turns and fed into
         # each new request so follow-up questions have something to refer to.
@@ -28,6 +28,26 @@ class FridayCore:
         self.interrupter = InterruptHandler()
 
         self.speaker.speak("All systems online. I am ready when you are.")
+
+    def _confirm_on_stdin(self, action, action_input, thought):
+        """Ask a human on stdin before a destructive action runs.
+
+        The console has no other confirmation channel — this blocks the
+        whole process on `input()`, exactly as everything else in the
+        console loop already blocks on speech recognition between turns.
+        Anything other than an explicit yes is a denial, including a blank
+        line or Ctrl-C reaching EOFError: default-deny applies here too, not
+        just when the callable is missing entirely.
+        """
+        self.speaker.speak(f"Confirmation required to run {action}.")
+        print(f"\n[CONFIRM] {action} wants to run with {action_input}")
+        if thought:
+            print(f"  reasoning: {thought}")
+        try:
+            answer = input("Approve? [y/N]: ").strip().lower()
+        except EOFError:
+            answer = "n"
+        return answer in ("y", "yes")
 
     def _run_graph(self, user_input, speak):
         """Drive the graph to completion, speaking its narration as it streams.

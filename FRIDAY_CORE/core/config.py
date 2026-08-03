@@ -84,6 +84,18 @@ DEFAULTS = {
         "model_dir": "yolo11n_openvino_model",
         "confidence": 0.5,
     },
+    "filesystem": {
+        # skills/os_control/manage_files.py refuses to touch anything outside
+        # these directories. This is the layer beneath the confirmation gate,
+        # not a replacement for it: confirmation stops a human from
+        # rubber-stamping a bad request, the allowlist stops a confused or
+        # adversarial model from being able to *propose* one against
+        # C:\Windows in the first place. Defaults to a dedicated workspace
+        # under the user's home rather than the whole home directory — the
+        # home directory holds Documents, Downloads and .ssh, none of which
+        # should be in scope by default.
+        "allowed_roots": [str(Path.home() / "FridayWorkspace")],
+    },
 }
 
 

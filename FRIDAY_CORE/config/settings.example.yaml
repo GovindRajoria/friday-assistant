@@ -86,3 +86,12 @@ vision:
   # project root. Regenerate it with: python benchmarks/openvino_yolo11_opt.py
   model_dir: yolo11n_openvino_model
   confidence: 0.5
+
+filesystem:
+  # skills/os_control/manage_files.py (Phase 6) refuses to touch anything
+  # outside these directories — resolved with Path.resolve() and checked
+  # against each root's ancestry, not string-matched, so ".." and a symlink
+  # pointing outside a root are refused rather than followed. Widen this
+  # deliberately, one directory at a time; do not point it at a drive root.
+  allowed_roots:
+    - ~/FridayWorkspace
