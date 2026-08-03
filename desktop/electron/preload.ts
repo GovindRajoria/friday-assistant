@@ -24,6 +24,9 @@ const api: FridayApi = {
   getHealth() {
     return ipcRenderer.invoke("hud:health");
   },
+  getBackendStatus() {
+    return ipcRenderer.invoke("hud:backend-status");
+  },
 };
 
 contextBridge.exposeInMainWorld("friday", api);

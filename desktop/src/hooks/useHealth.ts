@@ -4,6 +4,7 @@
 // The fetch itself happens in the main process (see electron/api.ts for why),
 // so everything here is a bridge call, not a network call.
 import { useEffect, useState } from "react";
+import type { FridayApi } from "../../electron/api";
 
 // The backend discovers skills once at import time and never changes the set
 // afterwards, so this is a liveness check that happens to carry a roster, not
@@ -16,7 +17,25 @@ export type HealthStatus =
   | { kind: "unavailable" }
   | { kind: "loading" }
   | { kind: "ok"; skills: string[] }
-  | { kind: "unreachable" };
+  // `detail` is why, in one sentence, from what main saw at launch. An
+  // unreachable backend with no explanation is the single most confusing
+  // state this app can be in — someone installed it, got "Disconnected",
+  // and had nothing to go on.
+  | { kind: "unreachable"; detail: string };
+
+function explain(report: Awaited<ReturnType<FridayApi["getBackendStatus"]>> | undefined): string {
+  switch (report?.kind) {
+    case "missing":
+      return `No backend found. The installer ships the shell only — point FRIDAY_CORE_DIR at your FRIDAY_CORE folder, or put one beside the app. Looked for ${report.pythonExe}`;
+    case "silent":
+      return `A backend was started from ${report.coreDir} but never answered within ${Math.round(report.timeoutMs / 1000)}s.`;
+    case "attached":
+    case "spawned":
+      return "The backend answered at launch but is not responding now. It may have stopped.";
+    default:
+      return "The backend is not answering on 127.0.0.1:8756.";
+  }
+}
 
 export function useHealth(): HealthStatus {
   const [status, setStatus] = useState<HealthStatus>({ kind: "loading" });
@@ -43,7 +62,17 @@ export function useHealth(): HealthStatus {
         // WebSocket can be open while a health poll times out (a turn
         // saturating the process, a paused machine), and reporting one as
         // the other would show a panel that contradicts the status bar.
-        if (!cancelled) setStatus({ kind: "unreachable" });
+        //
+        // The launch report is fetched only on failure. It never changes
+        // after startup, so polling it alongside a healthy backend would be
+        // asking main the same question every fifteen seconds forever.
+        let report;
+        try {
+          report = await window.friday?.getBackendStatus();
+        } catch {
+          report = undefined;
+        }
+        if (!cancelled) setStatus({ kind: "unreachable", detail: explain(report) });
       }
     }
 
