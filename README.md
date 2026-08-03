@@ -22,12 +22,16 @@ flowchart LR
 
   subgraph graph["core/graph.py — LangGraph state machine"]
     reason["reason<br/>structured output → thought/action"]
+    confirm["confirm<br/>human sign-off; denies by default"]
     act["act<br/>skill.execute(params)"]
     guard["anomaly_guard<br/>deterministic mute rule"]
     nudge["nudge<br/>action and answer both empty"]
     abort["abort<br/>steps past max_react_steps"]
 
     reason -->|"action set, under step bound"| act
+    reason -->|"action is destructive"| confirm
+    confirm -->|"approved"| act
+    confirm -->|"denied — becomes an Observation"| reason
     reason -->|"action = none, no answer"| nudge
     reason -->|"step bound reached"| abort
     act -->|"action = scan_environment"| guard
@@ -236,6 +240,46 @@ around twelve seconds.
 
 ---
 
+### OS automation and the confirmation gate
+
+Some skills type keystrokes and delete files. Those run behind two independent
+layers, and it is worth being clear that they do different jobs.
+
+**The confirmation gate** is a node in the graph. A skill whose manifest sets
+`"destructive": True` does not route from `reason` straight to `act` — it
+routes through `confirm` first, which asks a human and only lets the call
+through on a yes. The console driver asks on stdin; the server sends a
+`confirmation_required` event carrying the real proposed `{name, input}` and
+blocks the turn until the HUD answers or sixty seconds pass.
+
+**It defaults to deny.** A caller that wires no confirmation mechanism at all
+gets a refusal on every destructive action rather than an open door. That is
+the whole design: a gate whose safety depends on every future integration
+point remembering to configure it correctly is not a gate. A denial is not an
+abort either — it becomes the next `Observation`, so the model is told plainly
+that it was refused and can respond to that, and a model that simply keeps
+re-proposing the same action is stopped by the ordinary step bound.
+
+**The path allowlist** is the layer beneath it. `manage_files` refuses any path
+that does not resolve inside `filesystem.allowed_roots` — `~/FridayWorkspace`
+by default, deliberately not the whole home directory, which holds Documents,
+Downloads and `.ssh`. Resolution happens *before* the containment check, so
+`..` segments and symlinks are checked by where they actually land rather than
+by how they are spelled, and a path outside every root is **refused, not
+clamped** into the nearest one. Confirmation stops a bad request from being
+rubber-stamped; the allowlist makes a whole class of request unrepresentable
+regardless of what anyone approves.
+
+`manage_files` marks its **entire** manifest destructive, including the
+read-only `list` and `read` actions, so reading a file prompts for
+confirmation too. This is a known consequence of the manifest contract rather
+than an oversight: `destructive` is one flag per skill, and `action` is just a
+model-supplied parameter that routing never sees. Splitting the skill in four
+to get finer-grained gating was considered and rejected as more manifest
+surface than the convenience is worth.
+
+---
+
 ## Writing a skill
 
 A skill is a class with a `manifest`, an `execute()` method, and a module-level `setup()` factory:
@@ -248,6 +292,9 @@ class WeatherSkill:
             "description": "Fetches the current forecast for a named city. "
                            "Use this only for weather questions.",
             "parameters": ["city"],
+            # Optional, defaults to False. Set it True and every call to this
+            # skill goes through the confirmation gate first — see above.
+            "destructive": False,
         }
 
     def execute(self, params=None):
@@ -280,6 +327,9 @@ def setup():
 | `system_check` | CPU and RAM utilisation |
 | `log_fleet_market_data` | Appends structured rows to a CSV ledger |
 | `core_identity` | Answers "who are you" without burning a reasoning step |
+| `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
+| `window_control` | Lists, focuses, minimises and maximises desktop windows through `user32` |
+| `send_keys` | Types text or presses a hotkey combination — **destructive**, confirmed |
 
 ---
 
@@ -348,13 +398,14 @@ FRIDAY_CORE/
 ├── core/
 │   ├── main.py              Console entry point: skill discovery, graph construction, speech
 │   ├── session.py           run_turn: the graph-streaming loop, shared by console and server
-│   ├── graph.py             LangGraph state machine: reason / act / anomaly_guard / nudge / abort
+│   ├── graph.py             LangGraph state machine: reason / confirm / act / anomaly_guard / nudge / abort
 │   ├── state.py             AgentState TypedDict, the single source of loop truth
 │   ├── registry.py          Skill discovery + JSON schema derived from the manifests
 │   ├── prompts.py           System prompt and per-turn user message construction
 │   ├── llm_client.py        The single Ollama client; every call in the project goes through it
 │   ├── nodes/
 │   │   ├── reason.py        Structured-output call → thought / action / final_answer
+│   │   ├── confirm.py       Human sign-off before a destructive skill runs; defaults to deny
 │   │   ├── act.py           Skill dispatch + observation capture
 │   │   └── anomaly_guard.py Deterministic mute rule, enforced after every scan
 │   ├── config.py            Settings loader with layered fallbacks
@@ -400,7 +451,12 @@ Stated plainly, because they are the honest state of the project:
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
 - Speech recognition runs `base.en` on CPU with `int8` quantisation, chosen for latency over accuracy.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs seventeen pytest cases against the graph, the guard and the server — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs fifty-six pytest cases against the graph, the guard, the confirmation gate, the path allowlist and the server — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
+- The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
+- `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.
+- `window_control` is Windows-only. It calls `user32` through `ctypes` and reports that it is unsupported elsewhere rather than failing at import.
+- The path allowlist protects `manage_files` and nothing else. Other skills that write to disk — `draft_document`, the memory vault — predate it and are not routed through it.
 - The server has no authentication. It is safe only because it refuses to bind to anything but a loopback address — any process on the machine can drive it, and it can launch applications and write files. Exposing the port would hand those capabilities to the network.
 - **Offloaded inference (`llm.host` / `vlm.host` pointed at another machine) is unauthenticated and unencrypted.** `OLLAMA_HOST=0.0.0.0 ollama serve` on the remote box puts its model, and the compute to run it, on the LAN with no password and no TLS — anyone on that network can talk to it exactly as this project does. This is a same-network, trusted-LAN feature, not something to expose past a router. The reachability probe only decides where a request goes; it does not add any security to the connection.
 - A remote vlm.host going quiet is handled — the watcher backs off, reports the failure, and resumes on its own when the host comes back — but a remote llm.host going quiet mid-turn still surfaces as a failed turn (an `error` event), not a silent retry. The fallback in `core/llm_client.py` only applies at first resolution per process; it does not re-probe a host that was reachable at startup and later drops.

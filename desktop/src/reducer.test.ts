@@ -98,6 +98,55 @@ describe("reducer", () => {
     expect(second.transcript.map((entry) => entry.text)).toEqual(["one", "two"]);
   });
 
+  it("holds a confirmation_required event as the pending confirmation", () => {
+    const state = agentEvent({
+      type: "confirmation_required",
+      payload: { name: "manage_files", input: { action: "delete", path: "scratch.txt" } },
+    });
+    expect(state.pendingConfirmation).toEqual({
+      name: "manage_files",
+      input: { action: "delete", path: "scratch.txt" },
+    });
+    // It is also an ordinary transcript line, rendered the same way an
+    // `action` is — the operator should still be able to scroll back and see
+    // what they were asked about after the prompt itself is gone.
+    expect(state.transcript[0].text).toBe('manage_files({"action":"delete","path":"scratch.txt"})');
+    expect(state.orb).toBe("thinking");
+  });
+
+  it("clears the pending confirmation when the buttons are clicked", () => {
+    const asked = agentEvent({
+      type: "confirmation_required",
+      payload: { name: "manage_files", input: {} },
+    });
+    const resolved = reducer(asked, { kind: "confirmation_resolved" });
+    expect(resolved.pendingConfirmation).toBeNull();
+  });
+
+  it("clears the pending confirmation on a terminal event nobody answered", () => {
+    // The server's 60s timeout denies on its own and the turn moves on to an
+    // answer without this client ever clicking anything. A prompt left
+    // rendered after that would offer to approve a question nothing is
+    // waiting on — the click would go nowhere.
+    const asked = agentEvent({
+      type: "confirmation_required",
+      payload: { name: "manage_files", input: {} },
+    });
+    const answered = reducer(asked, {
+      kind: "agent_event",
+      event: { type: "answer", payload: { text: "nothing was done" } },
+      id: "id-2",
+    });
+    expect(answered.pendingConfirmation).toBeNull();
+
+    const errored = reducer(asked, {
+      kind: "agent_event",
+      event: { type: "error", payload: { text: "the turn failed" } },
+      id: "id-3",
+    });
+    expect(errored.pendingConfirmation).toBeNull();
+  });
+
   it("does not mutate the previous state object", () => {
     const before = initialState;
     agentEvent({ type: "thought", payload: { text: "x" } });
