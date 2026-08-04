@@ -353,7 +353,7 @@ written to steer, not to document.
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — 141 tests covering graph routing, the
+`pytest` against `FRIDAY_CORE/tests/` — 142 tests covering graph routing, the
 anomaly guard and its privacy switch, the step bound, the confirmation gate, the
 path allowlist, the mute path with the COM layer stubbed, the server, and a
 regression test for the placeholder-answer failure described above, all run
