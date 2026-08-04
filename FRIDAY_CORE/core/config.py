@@ -135,7 +135,13 @@ DEFAULTS = {
         # ("skills.web.track_price", "track_price"); a module name is matched
         # before the import, so disabling a heavy skill also skips loading
         # ultralytics or torch for it.
-        "disabled": [],
+        #
+        # track_price ships off. The plan for this project defers it until the
+        # proactive scheduler has proven itself over a few weeks, and that has
+        # not happened — the code works and it has not run over the weeks that
+        # would justify trusting it on a schedule, which are different claims.
+        # Remove it from this list to turn it on.
+        "disabled": ["track_price"],
     },
     "privacy": {
         # The camera anomaly rule — more than one person in frame, or the
@@ -151,6 +157,26 @@ DEFAULTS = {
         # second off switch for the muting.
         "auto_mute": False,
         "announce_only": True,
+    },
+    "calendar": {
+        # Directories holding .ics files, and/or individual .ics paths. Local
+        # files only: Google Calendar needs OAuth and a secret store, neither of
+        # which this project has, and inventing half of one to read a calendar
+        # would be the worst version of both.
+        "ics_paths": [],
+        # How far ahead "this week" looks.
+        "days_ahead": 7,
+    },
+    "email": {
+        # Read-only IMAP. The password is NEVER stored here — it is read from the
+        # FRIDAY_EMAIL_PASSWORD environment variable, because settings.yaml is a
+        # plain file that gets opened in editors, pasted into issues, and read
+        # aloud by the settings skill.
+        "imap_host": "",
+        "imap_port": 993,
+        "username": "",
+        "mailbox": "INBOX",
+        "password_env_var": "FRIDAY_EMAIL_PASSWORD",
     },
     "projects": {
         # Read-only development roots for inspect_repo and search_code. Kept

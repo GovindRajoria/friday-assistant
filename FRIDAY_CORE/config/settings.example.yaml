@@ -153,7 +153,31 @@ skills:
   # rather than by editing code. A module basename ("track_price") is matched
   # before the import, so disabling a heavy skill also skips loading its
   # dependencies; a manifest name ("run_command") is matched after.
-  disabled: []
+  #
+  # track_price ships off: it works, and it has not run over the weeks on a
+  # schedule that would justify trusting it. Those are different claims.
+  disabled:
+    - track_price
+
+calendar:
+  # Directories holding .ics files, or individual .ics paths. Local files only —
+  # Google Calendar needs OAuth and a secret store, and this project has neither.
+  # Export a calendar, or point this at a subscribed .ics on disk.
+  ics_paths: []
+  days_ahead: 7
+
+email:
+  # Read-only IMAP: unread senders and subjects, never message bodies.
+  #
+  # The password is NOT here and must not be put here. It is read from the
+  # environment variable named below, because this file gets opened in editors,
+  # pasted into issues, and read back by the manage_settings skill. Use an
+  # app-specific password, not your account password.
+  imap_host: ""
+  imap_port: 993
+  username: ""
+  mailbox: INBOX
+  password_env_var: FRIDAY_EMAIL_PASSWORD
 
 projects:
   # Read-only source trees for inspect_repo and search_code. Absolute paths.

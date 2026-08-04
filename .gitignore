@@ -21,6 +21,10 @@ FRIDAY_CORE/config/about_me.md
 # Reminder bodies are whatever the operator asked to be reminded of,
 # which is personal, and this repository is public.
 FRIDAY_CORE/config/reminders.json
+# The task list and the journal, for exactly the same reason: a to-do list is a
+# list of things someone has not done yet, and a journal is a diary.
+FRIDAY_CORE/config/tasks.json
+FRIDAY_CORE/config/journal.json
 FRIDAY_CORE/memory.db
 *.db
 FRIDAY_CORE/test_results.log
