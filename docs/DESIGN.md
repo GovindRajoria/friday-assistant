@@ -349,11 +349,95 @@ The same reasoning explains the negative instructions in the shipped manifests
 logic — it is the only information the model has when choosing a tool — so it is
 written to steer, not to document.
 
+## Forty-six skills, and what more tools cost
+
+The skill count went from 19 to 46 in one batch. The capabilities were the easy
+part; two things about that number were not obvious in advance and both had to be
+answered in code.
+
+**The `description` field stopped being documentation and became the load-bearing
+surface.** It always was the routing logic — it is the only information the model
+has when choosing — but with 19 skills the overlaps were rare enough to ignore. At
+46 they are structural: `read_document` against `manage_files`, `ocr_screen`
+against `describe_screen`, `search_files` against `search_code`, `diagnose_self`
+against four narrower status skills. `tools/check_manifests.py` cannot catch this,
+because a description that is present, 40 characters long, and *indistinguishable
+from its neighbour* passes every check while quietly sending the model to the wrong
+tool. So every competing pair now names the other explicitly — the pattern
+`explain_architecture` established with "Use `core_identity` instead for WHAT you
+can do" — and `tests/test_skill_routing_surface.py` pins those disambiguations so a
+later edit cannot drop one silently.
+
+**Reach was split into three allowlists rather than one.** `filesystem.allowed_roots`
+is a workspace where files are written and deleted; `projects.allowed_roots` is
+source trees that may only be read; `commands.allowed_roots` plus
+`allowed_executables` is where a program may be run. Collapsing any two would mean
+that permission to describe a repository implied permission to run a test suite in
+it, which is a different question with a different answer. The two new lists start
+empty, so a fresh install refuses and says what to configure — an allowlist that
+begins closed cannot be forgotten about.
+
+`skills.disabled` exists because none of this is measured. There is still no
+tool-selection accuracy number for this project, so the honest position is that
+nobody knows whether 45 tools route better or worse than 19 — and a group that
+turns out to confuse routing has to be switchable off in settings rather than
+revertable only by a merge.
+
+## More tools made conversation worse, and prompt rules did not fix it
+
+The first live session after the batch landed asked "Hello, friday." and got:
+`describe_screen`, `describe_screen` again, `read_webpage`, `read_webpage` again,
+three `web_search` calls, then `core_identity` — answered with a list of all 44
+other tools. Twenty-odd steps to say hello.
+
+Every one of those steps broke a rule that was already in the system prompt.
+OPERATING RULE 2 has said since Phase 1 that `"none"` is correct for a greeting.
+Rule 4 says `core_identity` is for capability questions and "do not call it for
+anything else". The rules were not missing, unclear, or new. They were ignored,
+and they were ignored *more* than before, because 45 plausible actions is 45 ways
+to avoid simply answering.
+
+That is the third time this project has reached the same conclusion — the anomaly
+rule, the `terminal` flag, and now this. **When asking has failed repeatedly, the
+fix is not better wording. It is making the wrong move unavailable.**
+
+So a conversational message never enters the reasoning loop. `core/small_talk.py`
+decides in Python whether the whole message is conversation, and the graph's entry
+point routes it to `core/nodes/converse.py`, which calls the model with **no schema
+and no tool list**. There is no `action` field to fill in, so a tool call is not
+something it can produce. The reply is still generated, not canned — a fixed
+"Hello, Sir." would have closed the bug and made the assistant worse.
+
+The classifier is deliberately narrow, because the failure modes are not
+symmetrical: a message it wrongly matches becomes unanswerable, while a message it
+wrongly declines merely costs a normal turn. One substantive word anywhere and it
+declines. "hi, what's the weather", "thanks, now delete that file" and "hello, how
+do you work?" all reach the reasoning loop.
+
+**A second failure the same session showed the step bound was the wrong bound.**
+"What is 15 percent of 240" — arithmetic that PERMANENT COGNITIVE GUARDRAIL 1
+explicitly forbids using a tool for — spent `web_search`, `describe_screen`,
+`run_command` and then *nine consecutive* `manage_settings` calls with varying
+parameters, so the identical-repeat guard never fired once, and hit the step bound
+37 seconds later with no answer at all. `steps` counts reasoning passes, so it
+tolerates a dozen tool calls before tripping.
+
+A turn now gets five tool calls, and three consecutive calls to one tool. Past
+either, it routes to `core/nodes/conclude.py` — the model, the transcript, no tools
+— rather than to `abort`, whose reply is an apology. By that point the answer is
+usually already in the transcript; what was missing was a turn in which answering
+was the only option. Measured on the same model and inputs: the greeting went from
+twenty-plus calls to zero in 0.9s, and the arithmetic from 12 calls and no answer
+to 4 calls and "36".
+
+Four calls is still three more than that question deserves. Recorded rather than
+claimed as fixed.
+
 ## What CI verifies
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — 142 tests covering graph routing, the
+`pytest` against `FRIDAY_CORE/tests/` — 484 tests covering graph routing, the
 anomaly guard and its privacy switch, the step bound, the confirmation gate, the
 path allowlist, the mute path with the COM layer stubbed, the server, and a
 regression test for the placeholder-answer failure described above, all run

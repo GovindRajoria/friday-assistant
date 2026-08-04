@@ -31,8 +31,8 @@ from langgraph.graph import END, StateGraph
 from core.config import SETTINGS
 from core.nodes.act import act_node
 from core.nodes.anomaly_guard import anomaly_guard_node
-from core.nodes.confirm import confirm_node
 from core.nodes.conclude import conclude_node
+from core.nodes.confirm import confirm_node
 from core.nodes.converse import converse_node
 from core.nodes.reason import reason_node
 from core.registry import NO_ACTION
