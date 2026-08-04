@@ -31,6 +31,11 @@ LOAD_FAILURES: list[dict] = []
 # distinguish "absent because it broke" from "absent because you said so".
 SKIPPED_SKILLS: list[dict] = []
 
+# Names of the skills that did load. Recorded here rather than counted from the
+# live registry so `skill_health` can report it without a second discovery pass,
+# which would re-import ultralytics and everything else for a status question.
+LOADED_SKILLS: list[str] = []
+
 
 def _disabled_names(settings: dict) -> set:
     return {str(name) for name in (settings.get("skills") or {}).get("disabled") or []}
@@ -44,6 +49,7 @@ def discover_skills(settings: dict | None = None) -> dict:
     active_skills = {}
     LOAD_FAILURES.clear()
     SKIPPED_SKILLS.clear()
+    LOADED_SKILLS.clear()
     skills_dir = PROJECT_ROOT / "skills"
 
     for file_path in sorted(skills_dir.rglob("*.py")):
@@ -95,6 +101,7 @@ def discover_skills(settings: dict | None = None) -> dict:
             continue
 
         active_skills[skill_name] = skill_instance
+        LOADED_SKILLS.append(skill_name)
         print(f"[+] Loaded: {skill_name}")
 
     return active_skills

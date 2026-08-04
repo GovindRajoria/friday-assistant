@@ -21,6 +21,7 @@ its events through this one callback; nothing here calls a speaker or a
 socket directly, which is what keeps narration from being spoken or streamed
 twice once there are two consumers reading the same run.
 """
+from core import turn_log
 from core.registry import NO_ACTION
 
 # Narration text spoken by the console driver. Kept distinct from
@@ -52,6 +53,10 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
         "screen_context": screen_context,
     }
     final_answer = ""
+    # Recorded as the turn runs so `explain_last_turn` has something true to
+    # read. In-process only — see core/turn_log.py for why that is not the
+    # durable journal the plan describes.
+    record = turn_log.start(user_input)
 
     for update in graph.stream(state, {"recursion_limit": 40}, stream_mode="updates"):
         if interrupter.interrupted:
@@ -67,6 +72,7 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
             # turn, not by any unit test, because the console driver reads the
             # return value below and never noticed.
             emit("answer", {"text": message})
+            turn_log.finish(record, message, outcome="interrupted")
             return message
 
         for node_name, delta in update.items():
@@ -85,6 +91,7 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
             # tool calls and observations distinctly from spoken narration.
             if node_name == "act":
                 emit("observation", {"text": delta.get("observation", "")})
+                turn_log.step(record, "observation", text=delta.get("observation", ""))
             elif node_name == "confirm":
                 # Approved: stay silent here. `act` runs next and emits its
                 # own observation for the real result; emitting anything
@@ -93,22 +100,35 @@ def run_turn(graph, user_input, memory_buffer, interrupter, emit, history_length
                 # the observation for this step, exactly like a normal tool
                 # failure, so it reaches both the model's next prompt and
                 # (via the same "observation" event type) anyone watching.
-                if not delta.get("action_approved", False):
+                approved = delta.get("action_approved", False)
+                if not approved:
                     emit("observation", {"text": delta.get("observation", "")})
+                # Recorded either way. "Why did you refuse to do that" is one of
+                # the questions explain_last_turn exists to answer, and a denial
+                # that left no trace could not be explained afterwards.
+                turn_log.step(record, "confirmation",
+                              approved=approved, text=delta.get("observation", ""))
             elif node_name == "anomaly_guard":
                 for line in delta.get("narration", []):
                     emit("anomaly", {"text": line})
+                    turn_log.step(record, "anomaly", text=line)
             else:
                 for line in delta.get("narration", []):
                     emit("thought", {"text": line})
+                    turn_log.step(record, "thought", text=line)
                 action = delta.get("action")
                 if action and action != NO_ACTION:
                     emit("action", {"name": action, "input": delta.get("action_input", {})})
+                    turn_log.step(record, "action",
+                                  name=action, input=delta.get("action_input", {}))
 
             if delta.get("final_answer"):
                 final_answer = delta["final_answer"]
 
     if not final_answer:
         final_answer = "I worked through that but have no answer to give."
+        turn_log.finish(record, final_answer, outcome="no answer produced")
+    else:
+        turn_log.finish(record, final_answer)
     emit("answer", {"text": final_answer})
     return final_answer
