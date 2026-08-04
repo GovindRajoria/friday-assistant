@@ -37,6 +37,12 @@ ABSENT_IN_CI = [
     # them, so vision/capture.py and everything importing it must keep them
     # out of the module-scope import chain server/app.py sits in.
     "mss", "PIL",
+    # The reading and OCR skills (5a) and the calendar skill (5e). Same rule as
+    # everything above: CI does not install them, so every one of these must be
+    # imported inside the method that uses it. A module-scope import would make
+    # the skill vanish from the registry on any machine missing the package,
+    # which is exactly the failure skill_health exists to expose.
+    "pypdf", "openpyxl", "icalendar", "winsdk",
 ]
 
 # The modules CI imports: the graph under test, the turn runner, and the

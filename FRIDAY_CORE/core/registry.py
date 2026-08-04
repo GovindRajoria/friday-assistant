@@ -4,37 +4,98 @@
 Discovery moves verbatim from the old core/main.py: same rglob + importlib +
 setup() contract, same deliberate swallowing of import errors so a missing
 dependency drops one skill rather than blocking boot (DESIGN.md:96-105).
+
+What is no longer swallowed is the *evidence*. Dropping one skill instead of
+refusing to boot is the right trade, but the old version printed a line to
+stdout and kept nothing, so a skill that failed to load simply was not there —
+no error, no event, nothing in the HUD. `scan_environment` fails exactly this
+way when the exported OpenVINO model directory is missing: vision disappears
+and the assistant cannot tell you it has gone blind. Failures now land in
+`LOAD_FAILURES`, which the `skill_health` skill reads back on request.
 """
 import importlib
 import os
+import traceback
 
-from core.config import PROJECT_ROOT
+from core.config import PROJECT_ROOT, SETTINGS
 
 NO_ACTION = "none"
 
+# Populated by discover_skills(), read by skills/utility/skill_health.py.
+# Each entry: {"module", "phase", "error", "detail"}. `phase` separates "the
+# import failed" from "setup() raised", because they have different fixes —
+# a missing package versus missing data or hardware.
+LOAD_FAILURES: list[dict] = []
 
-def discover_skills() -> dict:
+# Skills deliberately switched off in settings, recorded so `skill_health` can
+# distinguish "absent because it broke" from "absent because you said so".
+SKIPPED_SKILLS: list[dict] = []
+
+
+def _disabled_names(settings: dict) -> set:
+    return {str(name) for name in (settings.get("skills") or {}).get("disabled") or []}
+
+
+def discover_skills(settings: dict | None = None) -> dict:
     """Import every module under skills/ and instantiate the ones exposing setup()."""
+    settings = settings or SETTINGS
+    disabled = _disabled_names(settings)
+
     active_skills = {}
+    LOAD_FAILURES.clear()
+    SKIPPED_SKILLS.clear()
     skills_dir = PROJECT_ROOT / "skills"
 
-    for file_path in skills_dir.rglob("*.py"):
+    for file_path in sorted(skills_dir.rglob("*.py")):
         if file_path.name == "__init__.py":
             continue
 
         # Convert absolute path to relative module name
         relative_path = file_path.relative_to(PROJECT_ROOT)
         module_name = str(relative_path.with_suffix("")).replace(os.sep, ".")
+
+        # Checked against the module name *before* importing, as well as against
+        # the manifest name after, so disabling a heavy skill also skips paying
+        # for its imports — `annotate_image` pulls ultralytics and torch.
+        if module_name in disabled or file_path.stem in disabled:
+            SKIPPED_SKILLS.append({"module": module_name, "reason": "disabled in settings"})
+            print(f"[.] Skipped (disabled): {module_name}")
+            continue
+
         print(f"[*] Discovering: {module_name} at {file_path}")
         try:
             module = importlib.import_module(module_name)
-            if hasattr(module, "setup"):
-                skill_instance = module.setup()
-                skill_name = skill_instance.manifest["name"]
-                active_skills[skill_name] = skill_instance
-                print(f"[+] Loaded: {skill_name}")
-        except Exception as e:
-            print(f"[-] Failed to load {module_name}: {e}")
+        except Exception as error:
+            LOAD_FAILURES.append({
+                "module": module_name, "phase": "import",
+                "error": f"{type(error).__name__}: {error}",
+                "detail": traceback.format_exc(limit=3),
+            })
+            print(f"[-] Failed to import {module_name}: {error}")
+            continue
+
+        if not hasattr(module, "setup"):
+            continue
+
+        try:
+            skill_instance = module.setup()
+            skill_name = skill_instance.manifest["name"]
+        except Exception as error:
+            LOAD_FAILURES.append({
+                "module": module_name, "phase": "setup",
+                "error": f"{type(error).__name__}: {error}",
+                "detail": traceback.format_exc(limit=3),
+            })
+            print(f"[-] Failed to construct {module_name}: {error}")
+            continue
+
+        if skill_name in disabled:
+            SKIPPED_SKILLS.append({"module": module_name, "reason": "disabled in settings"})
+            print(f"[.] Skipped (disabled): {skill_name}")
+            continue
+
+        active_skills[skill_name] = skill_instance
+        print(f"[+] Loaded: {skill_name}")
 
     return active_skills
 

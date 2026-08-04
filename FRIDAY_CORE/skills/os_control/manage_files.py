@@ -21,47 +21,18 @@ complexity in a phase whose entire point is the safety gate. See the README.
 """
 from pathlib import Path
 
-from core.config import SETTINGS
+# The containment rule moved to core/paths.py when this stopped being the only
+# skill that could reach the filesystem. Same resolve-then-check behaviour,
+# same refusal semantics; the tests in tests/test_manage_files_allowlist.py
+# cover it through this skill unchanged.
+from core.paths import allowed_roots as _allowed_roots
+from core.paths import resolve_within as _resolve_within
 
 # Read actions are capped rather than dumped whole into the model's context —
 # a multi-megabyte log file would otherwise blow the prompt budget on a
 # single Observation.
 MAX_READ_CHARS = 4000
 MAX_LISTED_ENTRIES = 50
-
-
-def _allowed_roots() -> list[Path]:
-    # Read at call time, not at __init__/setup(), so a missing or malformed
-    # `filesystem` section raises inside execute() — which the graph already
-    # catches and turns into an error Observation — rather than inside
-    # setup(), where core/registry.py's bare `except Exception` would drop
-    # this skill from the registry entirely with nothing but a printed line.
-    return [Path(root).expanduser() for root in SETTINGS["filesystem"]["allowed_roots"]]
-
-
-def _resolve_within(path_str: str, roots: list[Path]) -> Path | None:
-    """Resolve `path_str` and return it only if it lands inside an allowed root.
-
-    Resolution happens before the containment check, not after, specifically
-    to defeat `..` segments and symlinks: Path.resolve() eliminates `..` and
-    follows any symlink already present on disk, so the containment check
-    below sees the real destination rather than the string that was typed.
-    A path that resolves outside every root is refused outright — clamping
-    it into the nearest root would silently do something nobody asked for.
-    """
-    try:
-        candidate = Path(path_str).expanduser()
-        if not candidate.is_absolute():
-            candidate = roots[0] / candidate
-        resolved = candidate.resolve(strict=False)
-    except (OSError, RuntimeError, ValueError):
-        return None
-
-    for root in roots:
-        root_resolved = root.resolve(strict=False)
-        if resolved == root_resolved or root_resolved in resolved.parents:
-            return resolved
-    return None
 
 
 class ManageFilesSkill:

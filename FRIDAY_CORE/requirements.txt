@@ -33,6 +33,20 @@ pillow
 # Document drafting skill
 python-docx
 
+# Reading skills (5a). pypdf for read_document, openpyxl for read_spreadsheet,
+# icalendar for the calendar skill's .ics parsing. All three are imported inside
+# the method that needs them, never at module scope — core/registry.py drops a
+# skill whose import raises, silently, so a module-scope import here would make
+# a missing package look like a skill that never existed.
+pypdf
+openpyxl
+icalendar
+
+# ocr_screen reads characters off the screen through the OCR engine already in
+# Windows, rather than shipping a second one. There is no tesseract binary on
+# the development machine, which is why this and not pytesseract.
+winsdk; sys_platform == "win32"
+
 # Windows-only system audio control (media_control skill degrades gracefully
 # on other platforms rather than failing to load)
 pyautogui; sys_platform == "win32"

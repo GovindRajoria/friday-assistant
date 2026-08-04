@@ -126,6 +126,17 @@ DEFAULTS = {
         "quiet_start": "22:00",
         "quiet_end": "07:00",
     },
+    "skills": {
+        # An escape hatch, not a feature. This install went from 19 skills to 46
+        # in one batch, and there is still no measured tool-selection accuracy
+        # for any of them — so a group that turns out to confuse routing has to
+        # be switchable off without editing code or reverting a merge. Names may
+        # be manifest names ("run_command") or module basenames
+        # ("skills.web.track_price", "track_price"); a module name is matched
+        # before the import, so disabling a heavy skill also skips loading
+        # ultralytics or torch for it.
+        "disabled": [],
+    },
     "privacy": {
         # The camera anomaly rule — more than one person in frame, or the
         # workstation out of frame — used to mute system audio unconditionally.
