@@ -50,7 +50,10 @@ def test_final_answer_routes_to_end(monkeypatch):
         lambda *a, **k: _decision(thought="No tool needed.", action="none", final_answer="direct answer"),
     )
 
-    result = graph.invoke({"user_input": "hi", "messages": [], "steps": 0}, {"recursion_limit": 40})
+    # Substantive input on purpose: "hi" would take the conversational entry
+    # point (core/small_talk.py) and never reach the routing this test is about.
+    result = graph.invoke({"user_input": "what is 2 plus 2", "messages": [], "steps": 0},
+                          {"recursion_limit": 40})
 
     assert result["final_answer"] == "direct answer"
     assert result["steps"] == 1

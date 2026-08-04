@@ -32,9 +32,30 @@ from core.config import SETTINGS
 from core.nodes.act import act_node
 from core.nodes.anomaly_guard import anomaly_guard_node
 from core.nodes.confirm import confirm_node
+from core.nodes.conclude import conclude_node
+from core.nodes.converse import converse_node
 from core.nodes.reason import reason_node
 from core.registry import NO_ACTION
+from core.small_talk import is_small_talk
 from core.state import AgentState
+
+# How many back-to-back identical tool calls a turn may make before the graph
+# stops it. Two is one more chance than none: the first repeat gets a pointed
+# observation and a chance to answer, the second ends the chain.
+REPEAT_LIMIT = 2
+
+# Tool calls a single turn may execute before it must answer from what it has.
+# Deliberately far below max_react_steps (12), which counts reasoning passes and
+# so permits a dozen tool calls before tripping. Measured on 2026-08-04: a
+# wandering turn spent 12 calls and 37 seconds and produced nothing. Five is
+# comfortably more than any legitimate chain observed in this project — the
+# longest real one is search, read, summarise.
+TOOL_CALL_BUDGET = 5
+
+# Consecutive calls to the same tool, whatever the parameters. Three is a
+# generous reading of "retrying with a correction"; nine in a row, which is what
+# was observed, is a model hunting for a result that is not there.
+SAME_TOOL_LIMIT = 3
 
 
 def route_after_reason(state: AgentState, active_skills: dict | None = None) -> str:
@@ -102,7 +123,32 @@ def route_after_act(state: AgentState, active_skills: dict | None = None) -> str
     skill = (active_skills or {}).get(state.get("action"))
     if skill is not None and skill.manifest.get("terminal"):
         return "finish"
-    return "anomaly_guard" if state.get("action") == "scan_environment" else "reason"
+
+    # Two identical repeats in one turn means the chain has stopped making
+    # progress. Observed live on 2026-08-04: the repeat guard fired, the model
+    # answered by choosing a *different* unrelated tool, that repeated too, and
+    # the turn ran on for twenty steps before ending with a list of every tool
+    # loaded. The instruction to answer now is in act.py's observation and it was
+    # not enough — with 45 tools there are 45 ways to avoid concluding. So the
+    # graph ends the chain and lets `finish` speak what is already known, exactly
+    # as it does for a terminal skill.
+    if state.get("repeated_calls", 0) >= REPEAT_LIMIT:
+        return "finish"
+
+    # The webcam guard runs before any budget check, because a scan that has
+    # already happened must still be assessed — the privacy rule is not
+    # something to skip because the turn is over budget.
+    if state.get("action") == "scan_environment":
+        return "anomaly_guard"
+
+    # Out of tool budget, or stuck on one tool: stop choosing and answer. Routed
+    # to `conclude` rather than `finish` because the last observation is usually
+    # not the answer here — unlike a terminal skill, where it is.
+    if (state.get("tool_calls", 0) >= TOOL_CALL_BUDGET
+            or state.get("same_tool_streak", 0) >= SAME_TOOL_LIMIT):
+        return "conclude"
+
+    return "reason"
 
 
 def nudge_node(state: AgentState) -> dict:
@@ -131,6 +177,8 @@ def build_graph(active_skills: dict, confirm=None):
     opt-in.
     """
     graph = StateGraph(AgentState)
+    graph.add_node("converse", converse_node)
+    graph.add_node("conclude", conclude_node)
     graph.add_node("reason", lambda s: reason_node(s, active_skills))
     graph.add_node("confirm", lambda s: confirm_node(s, confirm))
     graph.add_node("act", lambda s: act_node(s, active_skills))
@@ -139,13 +187,25 @@ def build_graph(active_skills: dict, confirm=None):
     graph.add_node("finish", finish_node)
     graph.add_node("abort", abort_node)
 
-    graph.set_entry_point("reason")
+    # A greeting does not enter the reasoning loop at all. `reason` hands the
+    # model a schema whose `action` is an enum of every loaded tool and is a
+    # required field, so for "hello" it is being asked which of 45 things to do
+    # when the answer is to say hello back. `converse` calls the model with no
+    # schema and no tool list, so a tool call is not something it can produce.
+    # See core/small_talk.py for the live transcript that forced this.
+    graph.set_conditional_entry_point(
+        lambda s: "converse" if is_small_talk(s.get("user_input", "")) else "reason",
+        {"converse": "converse", "reason": "reason"},
+    )
+    graph.add_edge("converse", END)
     graph.add_conditional_edges("reason", lambda s: route_after_reason(s, active_skills),
                                 {"act": "act", "confirm": "confirm", "nudge": "nudge",
                                  "abort": "abort", END: END})
     graph.add_conditional_edges("confirm", route_after_confirm, {"act": "act", "reason": "reason"})
     graph.add_conditional_edges("act", lambda s: route_after_act(s, active_skills),
-                                {"anomaly_guard": "anomaly_guard", "reason": "reason", "finish": "finish"})
+                                {"anomaly_guard": "anomaly_guard", "reason": "reason",
+                                 "finish": "finish", "conclude": "conclude"})
+    graph.add_edge("conclude", END)
     graph.add_edge("anomaly_guard", "reason")
     graph.add_edge("nudge", "reason")
     graph.add_edge("finish", END)

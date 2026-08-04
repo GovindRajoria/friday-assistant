@@ -295,7 +295,9 @@ def test_cancel_between_turns_does_not_poison_the_next_prompt(monkeypatch):
     client = TestClient(app)
     with client.websocket_connect("/ws") as ws:
         ws.send_text(json.dumps({"type": "cancel"}))
-        ws.send_text(json.dumps({"type": "prompt", "text": "hello"}))
+        # Not a greeting: that would take the conversational entry point in
+        # core/graph.py and never exercise the turn machinery under test.
+        ws.send_text(json.dumps({"type": "prompt", "text": "summarise the report"}))
 
         event = json.loads(ws.receive_text())
 
@@ -570,8 +572,10 @@ def test_a_failed_transcription_reports_itself_and_keeps_the_socket(monkeypatch,
         assert event["type"] == "error"
         assert "no such model" in event["payload"]["text"]
 
-        # Still usable afterwards — the point of catching it at all.
-        ws.send_text(json.dumps({"type": "prompt", "text": "are you there"}))
+        # Still usable afterwards — the point of catching it at all. Phrased as a
+        # real request rather than "are you there", which core/small_talk.py now
+        # routes to the conversational path, bypassing the turn under test.
+        ws.send_text(json.dumps({"type": "prompt", "text": "check the report status"}))
         assert ws.receive_json()["payload"]["text"] == "still here"
 
 

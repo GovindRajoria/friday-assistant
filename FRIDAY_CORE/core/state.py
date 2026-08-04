@@ -31,4 +31,15 @@ class AgentState(TypedDict, total=False):
     # re-proposed the call it just made, which it does — a single "summarise
     # today's news" fetched the same feed three times before answering.
     last_call: str
+    # How many times the repeated-call guard has fired this turn. Past the
+    # second, route_after_act stops the chain rather than letting the model pick
+    # yet another tool — telling it to answer does not reliably make it answer.
+    repeated_calls: int
+    # Tool calls actually executed this turn, and how many of those in a row went
+    # to the same tool. Both bound a wandering turn more tightly than `steps`,
+    # which counts reasoning passes and so allows a dozen tool calls before it
+    # trips. See core/nodes/act.py for the live transcript that motivated them.
+    tool_calls: int
+    same_tool_streak: int
+    last_tool: str
     action_approved: bool          # set by core/nodes/confirm.py; read by route_after_confirm (Phase 6)
