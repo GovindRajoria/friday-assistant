@@ -152,6 +152,34 @@ DEFAULTS = {
         "auto_mute": False,
         "announce_only": True,
     },
+    "projects": {
+        # Read-only development roots for inspect_repo and search_code. Kept
+        # separate from filesystem.allowed_roots on purpose: that one is a
+        # workspace where files get written and deleted, while these are real
+        # source trees that should only ever be read. Separate again from
+        # commands.allowed_roots below, because reading a project and executing
+        # something inside it are different permissions — a repo you are happy
+        # for an assistant to describe is not necessarily one you want it
+        # running a test suite in.
+        #
+        # Empty means those two skills refuse everything and say what to
+        # configure. Absolute paths.
+        "allowed_roots": [],
+    },
+    "commands": {
+        # run_tests and run_command. Both execute code, so both are gated by the
+        # confirmation node *and* bounded here, and both default to refusing
+        # everything: an executable allowlist that starts empty cannot be
+        # forgotten about, whereas one that starts permissive can.
+        #
+        # allowed_executables is matched against the program name only, so
+        # "git" permits git but not "git.exe --upload-pack=evil"; arguments are
+        # never used to decide whether a command may run.
+        "allowed_roots": [],
+        "allowed_executables": [],
+        "timeout_seconds": 120,
+        "max_output_chars": 4000,
+    },
     "filesystem": {
         # skills/os_control/manage_files.py refuses to touch anything outside
         # these directories. This is the layer beneath the confirmation gate,

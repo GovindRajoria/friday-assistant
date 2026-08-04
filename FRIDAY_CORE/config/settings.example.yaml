@@ -146,6 +146,40 @@ privacy:
   auto_mute: false
   announce_only: true
 
+skills:
+  # Names of skills to leave unloaded. An escape hatch, not a feature: this
+  # install carries 46 skills with no measured tool-selection accuracy for any of
+  # them, so a group that turns out to confuse routing can be switched off here
+  # rather than by editing code. A module basename ("track_price") is matched
+  # before the import, so disabling a heavy skill also skips loading its
+  # dependencies; a manifest name ("run_command") is matched after.
+  disabled: []
+
+projects:
+  # Read-only source trees for inspect_repo and search_code. Absolute paths.
+  # Separate from filesystem.allowed_roots — that is a workspace where files are
+  # written and deleted, these are repositories that should only ever be read.
+  # Empty means both skills refuse everything and say so.
+  allowed_roots: []
+
+commands:
+  # run_tests and run_command. These EXECUTE things, so they are bounded twice:
+  # by the confirmation gate in the graph, and by the two lists here. Both start
+  # empty, because an allowlist that begins closed cannot be forgotten about.
+  #
+  # Note that allowed_roots here is deliberately NOT the same list as projects
+  # above. Reading a repository and running its test suite are different
+  # permissions: a suite can drop a database or take a machine down, and a
+  # conftest.py is arbitrary code that runs on collection.
+  allowed_roots: []
+  # Program names only — "git" allows git and nothing else, and arguments never
+  # decide whether a command may run. There is no shell: no pipes, no
+  # redirection, no chaining, so an allowed program cannot be used to launch a
+  # disallowed one.
+  allowed_executables: []
+  timeout_seconds: 120
+  max_output_chars: 4000
+
 filesystem:
   # skills/os_control/manage_files.py (Phase 6) refuses to touch anything
   # outside these directories — resolved with Path.resolve() and checked
