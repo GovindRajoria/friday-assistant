@@ -129,16 +129,50 @@ def test_every_protected_name_is_lowercase_and_extensionless():
         assert not name.endswith(".exe")
 
 
-def test_it_refuses_to_kill_the_process_it_is_running_in():
-    """Otherwise "close python" takes the assistant down mid-sentence."""
+def test_it_refuses_to_kill_the_process_it_is_running_in(monkeypatch):
+    """Otherwise "close python" takes the assistant down mid-sentence.
+
+    terminate() is intercepted rather than allowed to run, for two reasons. The
+    suite must not depend on this process being the only python on the machine —
+    it is not, and an earlier test in another module leaves a short-lived one, which
+    made this fail only when the whole suite ran. And a test that really does kill
+    every process sharing its name would kill an unrelated interpreter the
+    developer happened to have open.
+    """
     own_name = psutil.Process(os.getpid()).name()
+    own_pid = os.getpid()
+    terminated = []
+
+    def spy(self):
+        terminated.append(self.pid)          # recorded, never carried out
+
+    monkeypatch.setattr(psutil.Process, "terminate", spy)
+    monkeypatch.setattr(psutil, "wait_procs", lambda procs, timeout=None: ([], list(procs)))
 
     result = ManageProcessesSkill().execute({"action": "kill", "name": own_name})
 
-    assert result["status"] == "error"
-    # Either it is the only one (refused as self) or every match was skipped.
-    assert "running in" in result["message"] or "No running process" in result["message"]
-    assert psutil.pid_exists(os.getpid())
+    assert own_pid not in terminated, "it tried to terminate the process it is running in"
+    assert psutil.pid_exists(own_pid)
+    # Either it was the only match and refused outright, or it skipped itself and
+    # said so while dealing with the others.
+    assert ("running in" in result["message"]
+            or "No running process" in result["message"]
+            or "left my own process alone" in result["message"])
+
+
+def test_it_never_terminates_its_own_parent_either(monkeypatch):
+    """The backend is spawned by the Electron main process; killing the parent
+    would take the window down with it."""
+    terminated = []
+    monkeypatch.setattr(psutil.Process, "terminate", lambda self: terminated.append(self.pid))
+    monkeypatch.setattr(psutil, "wait_procs", lambda procs, timeout=None: ([], list(procs)))
+    parent_pids = {parent.pid for parent in psutil.Process(os.getpid()).parents()}
+
+    for name in {psutil.Process(pid).name() for pid in parent_pids
+                 if psutil.pid_exists(pid)} or {"explorer.exe"}:
+        ManageProcessesSkill().execute({"action": "kill", "name": name})
+
+    assert not (parent_pids & set(terminated)), "it tried to terminate one of its own parents"
 
 
 def test_killing_something_that_does_not_exist_says_so():

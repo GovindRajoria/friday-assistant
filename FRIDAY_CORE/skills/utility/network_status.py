@@ -30,7 +30,9 @@ class NetworkStatusSkill:
                 "addresses and hostname, and the round-trip time to a host. Parameters: "
                 "optionally 'host' to measure latency to something specific. Use this when "
                 "asked if the internet is working, what this machine's IP is, or whether a "
-                "server is reachable. Its answer is complete — the turn ends when it returns."
+                "server is reachable. Its answer is complete — the turn ends when it returns. "
+                "Use check_camera_stream for a specific camera, and diagnose_self when the "
+                "question is whether everything is working rather than the network alone."
             ),
             "parameters": ["host"],
             "terminal": True,

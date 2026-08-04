@@ -38,9 +38,11 @@ class DiagnoseSelfSkill:
                 "whether the vision model files exist, whether a microphone and camera are "
                 "present, and which optional packages are missing. Use this when something "
                 "is broken or behaving strangely, or when asked if you are working "
-                "properly. Its answer is complete — the turn ends when it returns. Use "
-                "skill_health for which skills failed to load; system_check for a quick "
-                "CPU and RAM reading only."
+                "properly. Its answer is complete — the turn ends when it returns. "
+                "This is the broad sweep; for one specific question prefer the narrower "
+                "skill: skill_health for which skills failed to load, disk_report for "
+                "storage, network_status for connectivity, gpu_status for accelerators, "
+                "system_check for a quick CPU and RAM reading."
             ),
             "parameters": [],
             "terminal": True,

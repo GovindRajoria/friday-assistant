@@ -33,8 +33,9 @@ class OcrScreenSkill:
                 "message, a stack trace, a code snippet, a serial number, any window whose "
                 "text cannot be copied. Parameters: optionally 'region' as "
                 "'left,top,width,height' and 'monitor'. This is exact extraction, not a "
-                "description: use describe_screen to be told what the screen looks like, and "
-                "this when the precise words matter."
+                "description: use describe_screen to be told what the screen looks like, "
+                "screenshot to save a picture as a file, and this when the precise words "
+                "matter."
             ),
             "parameters": ["region", "monitor"],
         }

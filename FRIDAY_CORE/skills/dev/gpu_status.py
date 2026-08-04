@@ -32,7 +32,9 @@ class GpuStatusSkill:
                 "memory used and total, utilisation, temperature, driver version, and which "
                 "devices the OpenVINO runtime can target for inference. Use this when asked "
                 "about the GPU, VRAM, accelerators, why inference is slow, or where a model "
-                "can run. Its answer is complete — the turn ends when it returns."
+                "can run. Its answer is complete — the turn ends when it returns. Use "
+                "system_check for CPU and RAM, and diagnose_self when the question is "
+                "whether everything is working rather than the accelerators alone."
             ),
             "parameters": [],
             "terminal": True,

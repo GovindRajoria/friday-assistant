@@ -30,7 +30,8 @@ class DiskReportSkill:
                 "optionally 'path' to break down what is using space there. Use this when "
                 "asked about disk space, a full drive, or what is taking up room. Its answer "
                 "is complete — the turn ends when it returns. Use system_check for CPU and "
-                "memory rather than storage."
+                "memory rather than storage, and diagnose_self when the question is broader "
+                "than storage — whether everything is working."
             ),
             "parameters": ["path"],
             "terminal": True,

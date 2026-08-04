@@ -43,8 +43,9 @@ class SearchFilesSkill:
                 "Finds files on this computer inside the allowed workspace, by filename "
                 "pattern or by text inside them. Parameters: 'pattern' (what to look for), "
                 "'mode' (name or content), and optionally 'path' to search under. Read-only. "
-                "Use search_code for a source tree with file:line matches; use this to "
-                "locate a document before reading it with read_document."
+                "Use search_code for a source tree with file:line matches, manage_files to "
+                "list one directory you already know the path of, and this to locate a "
+                "document anywhere in the workspace before reading it with read_document."
             ),
             "parameters": ["pattern", "mode", "path"],
         }

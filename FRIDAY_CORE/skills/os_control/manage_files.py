@@ -44,7 +44,9 @@ class ManageFilesSkill:
                 "configured workspace allowlist — it cannot touch anything outside it, "
                 "not even via '..' or a symlink. Parameters: 'action' (list, read, move, "
                 "delete), 'path', and 'destination' (move only). Every call requires "
-                "human confirmation before it runs."
+                "human confirmation before it runs. Use read_document to read the text of "
+                "a PDF, Word or Markdown file, and search_files to find a file whose path "
+                "you do not already know — this one is for listing, moving and deleting."
             ),
             "parameters": ["action", "path", "destination"],
             "destructive": True,

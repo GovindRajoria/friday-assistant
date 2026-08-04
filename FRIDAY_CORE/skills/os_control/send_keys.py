@@ -29,7 +29,8 @@ class SendKeysSkill:
                 "Synthesises keyboard input into whatever window currently has focus: "
                 "either types a literal string, or presses a named key combination, e.g. "
                 "['ctrl','s']. Parameters: 'text' (a string to type) or 'keys' (a list of "
-                "key names to press together) — exactly one of the two is required."
+                "key names to press together) — exactly one of the two is required. "
+                "It cannot see which window has focus, so every call requires confirmation."
             ),
             "parameters": ["text", "keys"],
             "destructive": True,

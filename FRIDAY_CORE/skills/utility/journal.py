@@ -30,8 +30,9 @@ class JournalSkill:
                 "Parameters: 'action' (add, read), 'text' for the note, and 'when' for "
                 "reading — 'today', 'yesterday', 'week', or a date like 2026-08-01. Use this "
                 "when the user wants to record what they did or ask what they did on some "
-                "past day. Use task_list for things still to be done, and manage_memory for "
-                "facts to remember rather than events."
+                "past day. Use task_list for things still to be done, reminders to be "
+                "interrupted at a future time, and manage_memory for facts to remember "
+                "rather than events that happened."
             ),
             "parameters": ["action", "text", "when"],
         }
