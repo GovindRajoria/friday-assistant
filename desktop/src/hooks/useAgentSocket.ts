@@ -96,6 +96,15 @@ export function useAgentSocket() {
     return true;
   }, []);
 
+  // Tells the backend how to read the binary frames that follow: a deliberate
+  // recording to be transcribed into the prompt box for review, or room audio to
+  // be gated on the wake word and acted on. It is a mode rather than a per-frame
+  // flag because a binary WebSocket frame has nowhere to carry one.
+  const sendListenMode = useCallback((ambient: boolean) => {
+    if (socketRef.current?.readyState !== WebSocket.OPEN) return;
+    socketRef.current.send(JSON.stringify({ type: "listen_mode", ambient }));
+  }, []);
+
   const sendCancel = useCallback(() => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({ type: "cancel" }));
@@ -111,5 +120,5 @@ export function useAgentSocket() {
     dispatch({ kind: "confirmation_resolved" });
   }, []);
 
-  return { state, sendPrompt, sendAudio, sendCancel, sendConfirm };
+  return { state, sendPrompt, sendAudio, sendListenMode, sendCancel, sendConfirm };
 }

@@ -291,6 +291,13 @@ async def _transcribe(audio: bytes) -> str:
 
 
 _connections: set[WebSocket] = set()
+
+# Per-connection: is this client's microphone open continuously? Keyed by socket
+# rather than held as one global because two clients can legitimately differ —
+# the HUD listening to the room while a test client sends a deliberate recording.
+# Absent means push-to-talk, so a client that never sends `listen_mode` (an older
+# HUD build, or the test suite) behaves exactly as it did before.
+_listen_modes: dict[WebSocket, bool] = {}
 _memory_buffer: list[str] = []
 _busy = False  # single-flight flag; see the module docstring for why not a lock
 # Strong references to in-flight turn tasks. asyncio only holds a weak one, so
@@ -577,16 +584,30 @@ async def _run_and_release(text: str) -> None:
         _busy = False
 
 
-async def _handle_utterance(audio: bytes) -> None:
-    """Transcribe one recorded utterance and report what was heard.
+async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
+    """Transcribe one recorded utterance and either report it or act on it.
 
-    It reports; it does not run. The text is broadcast as a `transcript`
-    event and lands in the HUD's prompt box, where the operator reads it and
-    presses send. Feeding it straight into the graph would be one keystroke
-    shorter and would mean a misheard sentence becomes a request this
-    assistant acts on — and the actions available to it include deleting
-    files. Recognition being good is the reason that rarely happens; the
-    review step is the reason it does not matter when it does.
+    **Push-to-talk (`ambient=False`) reports; it does not run.** The text is
+    broadcast as a `transcript` event and lands in the HUD's prompt box, where
+    the operator reads it and presses send. Feeding it straight into the graph
+    would be one keystroke shorter and would mean a misheard sentence becomes a
+    request this assistant acts on — and the actions available to it include
+    deleting files. Recognition being good is the reason that rarely happens;
+    the review step is the reason it does not matter when it does.
+
+    **Always-listening (`ambient=True`) runs, but only when addressed.** The
+    review step is replaced by a different gate: the operator has to have said
+    the assistant's name at the start of the sentence. That is a deliberate
+    trade rather than a relaxation — hands-free is the entire point of the mode,
+    and a wake word is an explicit act of address, where a push-to-talk
+    transcript is merely audio the operator happened to record. Everything
+    destructive still stops at the confirmation gate, so the worst a mishearing
+    reaches on its own is a read-only skill.
+
+    Anything not addressed to the assistant is **discarded silently** — not
+    broadcast, not logged, not stored. A continuous microphone that echoed
+    every overheard sentence back into the HUD would be a transcript of the
+    room, which is not something this project should produce.
 
     Not gated on `_busy` either. Hearing is not a turn: transcribing while an
     answer is still streaming is fine, and the operator can line up their
@@ -599,17 +620,48 @@ async def _handle_utterance(audio: bytes) -> None:
         # space for the weights, stt_enabled off) as well as a blob that
         # would not decode. All of them are things the operator can act on
         # once they can see them, and none are worth dropping the connection.
-        await _broadcast(events.envelope(events.ERROR, {"text": f"Could not transcribe that: {error}"}))
+        if not ambient:
+            await _broadcast(events.envelope(events.ERROR, {"text": f"Could not transcribe that: {error}"}))
         return
 
     if not text:
-        # The VAD found no speech. Saying so matters: without it, pressing
-        # the button and releasing it too early looks identical to the
-        # microphone being broken.
-        await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
+        # The VAD found no speech. Saying so matters for push-to-talk: without
+        # it, pressing the button and releasing it too early looks identical to
+        # the microphone being broken. In ambient mode silence is the normal
+        # case and saying so every few seconds would be unusable.
+        if not ambient:
+            await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
         return
 
-    await _broadcast(events.envelope(events.TRANSCRIPT, {"text": text}))
+    if not ambient:
+        await _broadcast(events.envelope(events.TRANSCRIPT, {"text": text}))
+        return
+
+    from core.wake_word import find
+
+    addressed, command = find(text, SETTINGS["assistant"].get("wake_word", "friday"))
+    if not addressed:
+        return                      # room noise; nothing said, nothing kept
+
+    # The name alone is a request for attention. Handed on as "yes?", which the
+    # conversational entry point answers in one line without touching a tool.
+    spoken = command or "yes?"
+    await _broadcast(events.envelope(events.TRANSCRIPT, {"text": spoken}))
+
+    global _busy
+    if _busy:
+        # Single-flight, exactly as a typed prompt is. Saying so is better than
+        # dropping it silently, because the operator spoke and heard nothing.
+        await _broadcast(events.envelope(events.STATUS,
+                                        {"text": "I heard you, but I am still working on the last thing."}))
+        return
+
+    # Set here, before the await, and cleared by _run_and_release. Checking the
+    # flag without setting it would leave a window in which two utterances
+    # arriving close together both pass — and continuous listening produces
+    # utterances close together by design, so that window would be hit.
+    _busy = True
+    await _run_and_release(spoken)
 
 
 @app.websocket("/ws")
@@ -636,6 +688,12 @@ async def ws_endpoint(websocket: WebSocket):
 
             audio = message.get("bytes")
             if audio is not None:
+                # Which kind of audio this is comes from the mode the HUD set
+                # with a `listen_mode` message, not from the frame — a binary
+                # WebSocket frame has nowhere to put a header, and prefixing a
+                # magic byte to the audio would mean every reader has to know
+                # about it. The mode is per-connection state, defaulting to
+                # push-to-talk so an older HUD build behaves exactly as before.
                 # A task, not an inline await, for exactly the reason the
                 # prompt below is a task: awaiting here blocks this receive
                 # loop for the whole transcription, and the HUD is one
@@ -643,7 +701,8 @@ async def ws_endpoint(websocket: WebSocket):
                 # answer a pending confirmation and unable to send anything
                 # for two seconds on a warm model — or for the length of a
                 # 460 MB download on the very first press after an install.
-                _utterances.add(job := asyncio.create_task(_handle_utterance(audio)))
+                _utterances.add(job := asyncio.create_task(
+                    _handle_utterance(audio, ambient=_listen_modes.get(websocket, False))))
                 job.add_done_callback(_utterances.discard)
                 continue
 
@@ -659,6 +718,19 @@ async def ws_endpoint(websocket: WebSocket):
                 continue
 
             message_type = message.get("type")
+            if message_type == "listen_mode":
+                # The HUD announcing that the microphone is now open
+                # continuously, so the frames that follow are room audio to be
+                # gated on the wake word rather than a deliberate recording.
+                ambient = bool(message.get("ambient"))
+                _listen_modes[websocket] = ambient
+                wake_word = SETTINGS["assistant"].get("wake_word", "friday")
+                await websocket.send_text(json.dumps(events.envelope(
+                    events.STATUS,
+                    {"text": (f"Listening continuously. Say '{wake_word}' and then what you want."
+                              if ambient else "Continuous listening off.")},
+                )))
+                continue
             if message_type == "cancel":
                 # Sets the flag; run_turn's own loop is what actually stops
                 # the turn on its next streamed update. Nothing to send
@@ -702,6 +774,9 @@ async def ws_endpoint(websocket: WebSocket):
         pass
     finally:
         _connections.discard(websocket)
+        # Keyed by socket, so it has to be dropped with the socket or the dict
+        # grows by one entry per reconnect for the life of the process.
+        _listen_modes.pop(websocket, None)
 
 
 def _require_loopback(host: str) -> None:

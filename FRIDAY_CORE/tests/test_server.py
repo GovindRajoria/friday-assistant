@@ -635,3 +635,114 @@ def test_a_slow_transcription_does_not_make_the_socket_deaf(monkeypatch, no_load
 
         release.set()
         assert ws.receive_json()["type"] == "transcript"
+
+
+# --- always-listening: the wake-word gate over the socket -----------------
+
+
+def test_ambient_audio_without_the_wake_word_runs_nothing(monkeypatch, no_loaded_model):
+    """The whole point of the gate. A continuous microphone that acted on
+    overheard speech, or echoed it back into the HUD, would be unusable."""
+    monkeypatch.setattr(
+        server_app, "_build_transcriber",
+        lambda: _FakeTranscriber(text="so I told him the deadline moved to Friday"),
+    )
+    turns = []
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: turns.append(1) or _decision(action="none", thought="", final_answer="ran"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        assert ws.receive_json()["type"] == "status"        # the mode acknowledgement
+
+        ws.send_bytes(b"room audio")
+        # Nothing should come back at all, so prove the socket is still live by
+        # round-tripping something after it.
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": False}))
+        event = ws.receive_json()
+
+    assert "Continuous listening off" in event["payload"]["text"]
+    assert turns == [], "an unaddressed sentence started a turn"
+
+
+def test_ambient_audio_with_the_wake_word_runs_the_turn(monkeypatch, no_loaded_model):
+    monkeypatch.setattr(
+        server_app, "_build_transcriber",
+        lambda: _FakeTranscriber(text="Friday, what is the weather"),
+    )
+    prompts = []
+
+    def fake_chat(messages, **kwargs):
+        prompts.append(messages)
+        return _decision(action="none", thought="", final_answer="31 degrees")
+
+    monkeypatch.setattr("core.llm_client.chat", fake_chat)
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        ws.receive_json()
+
+        ws.send_bytes(b"addressed audio")
+        events_seen = [ws.receive_json() for _ in range(2)]
+
+    kinds = [event["type"] for event in events_seen]
+    assert "transcript" in kinds
+    transcript = next(e for e in events_seen if e["type"] == "transcript")
+    # The name is stripped: the model must not be asked "Friday, what is..."
+    assert transcript["payload"]["text"] == "what is the weather"
+    assert prompts, "the turn never reached the model"
+
+
+def test_push_to_talk_still_only_reports_and_never_runs(monkeypatch, no_loaded_model):
+    """The default mode is unchanged, and that safety property is the reason
+    ambient mode had to be opt-in rather than a replacement."""
+    monkeypatch.setattr(
+        server_app, "_build_transcriber",
+        lambda: _FakeTranscriber(text="Friday, delete everything"),
+    )
+    turns = []
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: turns.append(1) or _decision(action="none", thought="", final_answer="x"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")                    # no listen_mode sent at all
+        event = ws.receive_json()
+
+    assert event["type"] == "transcript"
+    # Not stripped, not acted on: it goes to the prompt box verbatim for review.
+    assert event["payload"]["text"] == "Friday, delete everything"
+    assert turns == []
+
+
+def test_the_wake_word_alone_is_answered_without_a_tool(monkeypatch, no_loaded_model):
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber(text="Friday"))
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: "Yes, Sir?")
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        ws.receive_json()
+        ws.send_bytes(b"just the name")
+        events_seen = [ws.receive_json() for _ in range(2)]
+
+    transcript = next(e for e in events_seen if e["type"] == "transcript")
+    assert transcript["payload"]["text"] == "yes?"
+    answer = next(e for e in events_seen if e["type"] == "answer")
+    assert answer["payload"]["text"] == "Yes, Sir?"
+
+
+def test_a_failed_ambient_transcription_is_silent(monkeypatch, no_loaded_model):
+    """Push-to-talk reports a transcription failure because a human is waiting
+    on it. In ambient mode that would fire on every passing noise."""
+    monkeypatch.setattr(
+        server_app, "_build_transcriber",
+        lambda: _FakeTranscriber(error=RuntimeError("undecodable")),
+    )
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        ws.receive_json()
+        ws.send_bytes(b"noise")
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": False}))
+        event = ws.receive_json()
+
+    assert "Continuous listening off" in event["payload"]["text"]

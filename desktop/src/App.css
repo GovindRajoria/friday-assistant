@@ -874,6 +874,48 @@
   50% { opacity: 0.45; box-shadow: 0 0 0 5px rgba(255, 107, 107, 0); }
 }
 
+/* The always-listening toggle. Deliberately a different colour from the
+   push-to-talk button: red there means "recording this one utterance now",
+   whereas this one means "the microphone is open indefinitely", and conflating
+   the two would hide the state that matters more. */
+.command__button--wake {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.command__wake-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.command__button--wake-live {
+  border-color: rgba(94, 234, 212, 0.55);
+  background: rgba(94, 234, 212, 0.1);
+  color: var(--cyan, #5eead4);
+}
+
+/* Awake but nobody talking: a slow breath, so an open microphone is never
+   mistaken for an idle one at a glance. */
+.command__button--wake-live .command__wake-dot {
+  opacity: 1;
+  animation: wake-breathe 2.6s ease-in-out infinite;
+}
+
+/* Someone is speaking right now — faster, and it is the only difference
+   between "open" and "picking you up", which is worth being able to see. */
+.command__button--wake-hearing .command__wake-dot {
+  animation: wake-breathe 0.7s ease-in-out infinite;
+}
+
+@keyframes wake-breathe {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.5); }
+  50% { opacity: 0.4; box-shadow: 0 0 0 5px rgba(94, 234, 212, 0); }
+}
+
 /* ------------------------------------------------------------- scrollbars */
 
 .transcript__scroll::-webkit-scrollbar,

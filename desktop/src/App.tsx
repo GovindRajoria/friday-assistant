@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmationPrompt } from "./components/ConfirmationPrompt";
+import { ListenToggle } from "./components/ListenToggle";
 import { MicButton } from "./components/MicButton";
 import { ProfileEditor } from "./components/ProfileEditor";
 import { PromptInput } from "./components/PromptInput";
@@ -11,13 +12,15 @@ import { TitleBar } from "./components/TitleBar";
 import { Transcript } from "./components/Transcript";
 import { useAgentSocket } from "./hooks/useAgentSocket";
 import { useHealth } from "./hooks/useHealth";
+import { useAlwaysListening } from "./hooks/useAlwaysListening";
 import { useMicrophone } from "./hooks/useMicrophone";
 import "./App.css";
 
 export function App() {
-  const { state, sendPrompt, sendAudio, sendCancel, sendConfirm } = useAgentSocket();
+  const { state, sendPrompt, sendAudio, sendListenMode, sendCancel, sendConfirm } = useAgentSocket();
   const { health, refresh: refreshHealth } = useHealth();
   const { micState, startRecording, stopRecording } = useMicrophone(sendAudio);
+  const { listeningState, startListening, stopListening } = useAlwaysListening(sendAudio);
   // Whether the biography editor is open is a view preference, not
   // something the backend said, so it stays out of the reducer.
   const [editingProfile, setEditingProfile] = useState(false);
@@ -30,10 +33,38 @@ export function App() {
     [state.transcript],
   );
 
+  const listening = listeningState.kind !== "off"
+    && listeningState.kind !== "denied"
+    && listeningState.kind !== "unsupported";
+
   const toggleRecording = useCallback(() => {
     if (micState.kind === "recording" || micState.kind === "opening") stopRecording();
     else startRecording();
   }, [micState.kind, startRecording, stopRecording]);
+
+  // The two microphone modes are mutually exclusive, and that is enforced here
+  // rather than trusted: two MediaRecorders on two getUserMedia streams would
+  // both ship overlapping audio, and the backend would transcribe the same
+  // sentence twice and run it twice.
+  const toggleAlwaysListening = useCallback(() => {
+    if (listening) {
+      stopListening();
+      sendListenMode(false);
+      return;
+    }
+    if (micState.kind === "recording" || micState.kind === "opening") stopRecording();
+    // The mode is announced before the first frame can arrive, so no utterance
+    // is ever read under the wrong interpretation.
+    sendListenMode(true);
+    startListening();
+  }, [listening, micState.kind, sendListenMode, startListening, stopListening, stopRecording]);
+
+  // If the socket drops, tell the backend again when it returns: listen mode is
+  // per-connection state there, so a reconnect silently reverts it to
+  // push-to-talk while this window still believes it is listening.
+  useEffect(() => {
+    if (state.connected && listening) sendListenMode(true);
+  }, [state.connected, listening, sendListenMode]);
 
   // The global hotkey is registered by the main process — a renderer key
   // handler only fires when this window already has focus, which is the one
@@ -56,7 +87,11 @@ export function App() {
           {/* Recording is a local fact about this window, not something the
               backend reported, so it is passed in beside the orb state rather
               than folded into the reducer. */}
-          <Reactor state={state.orb} connected={state.connected} listening={micState.kind === "recording"} />
+          <Reactor
+            state={state.orb}
+            connected={state.connected}
+            listening={micState.kind === "recording" || listeningState.kind === "hearing"}
+          />
           <StatusBar connected={state.connected} health={health} turns={turns} events={state.transcript.length} />
         </aside>
 
@@ -94,11 +129,16 @@ export function App() {
           busy={state.orb === "thinking"}
           dictation={state.dictation}
         >
+          <ListenToggle
+            state={listeningState}
+            onToggle={toggleAlwaysListening}
+            disabled={!state.connected}
+          />
           <MicButton
             state={micState}
             onStart={startRecording}
             onStop={stopRecording}
-            disabled={!state.connected}
+            disabled={!state.connected || listening}
           />
         </PromptInput>
       </footer>
