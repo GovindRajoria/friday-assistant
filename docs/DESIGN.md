@@ -433,11 +433,66 @@ to 4 calls and "36".
 Four calls is still three more than that question deserves. Recorded rather than
 claimed as fixed.
 
+## The wake word, and why the recorder never stops
+
+Push-to-talk was the first voice input because it is unambiguous: the operator
+pressed something, so the audio that follows is meant for the assistant. Asking to
+be listened to continuously replaces that certainty with a guess, and everything
+below is about making the guess cheap to get wrong in the right direction.
+
+**Why not a dedicated wake-word model.** openWakeWord is the correct tool: a tiny
+always-on network at one or two percent of a core, so nothing is transcribed until
+it fires. It was rejected for this build for a specific reason rather than a vague
+one — it ships no pretrained "friday". The available words are "hey jarvis",
+"alexa", "hey mycroft" and similar, and training a custom one is a separate
+project with its own dataset. Given the choice between the right architecture with
+the wrong name and a heavier approach that answers to "Friday", the name won. The
+cost is stated in the README: every utterance in the room is transcribed locally
+before it can be discarded, at roughly a quarter of a core while anyone is
+talking. If a "friday" model ever exists, this is the piece to replace.
+
+**Why the recorder is never started on demand.** The obvious implementation
+watches the microphone's energy, starts recording when speech begins, and stops
+when it ends. That loses the beginning of the first word, because detection needs
+a couple of hundred milliseconds of evidence before it can be sure — and in this
+design the first word is the one that decides whether anything happens at all.
+`riday, what's the weather` reads as a broken microphone. So the recorder is
+always running and is *cut* during silence: speech onset is captured because
+capture began before the speech did, and the only gap is between one recorder
+ending and the next beginning, which by construction falls inside a silence.
+
+**Why the threshold moves.** A constant is deaf in a quiet room and permanently
+triggered in a noisy one, and the same laptop is both across a day. The noise
+floor is tracked as an exponential average of the level measured *while nobody is
+speaking*, and the trigger sits a fixed multiple above it. Updating the floor
+during speech would be the bug that eats itself: a long sentence would drag the
+floor up past the speaker's own voice and the assistant would go deaf mid-request.
+
+**Why the matching is asymmetric.** `core/wake_word.py` is generous about what
+counts as the name and strict about where it appears, and that shape comes
+directly from the costs. A missed wake word costs one repetition, so the variant
+list and the fuzzy ratio are wide enough to accept the mishearings `small.en`
+actually produces for a proper noun on an accented voice. A false trigger runs a
+turn on a sentence somebody said to another person, so the name must appear in the
+first few words with only filler before it. "Thursday" was in the variant list
+during development and was removed for exactly this reason: it is a plausible
+mishearing of "Friday" *and* a real word people say to each other constantly, and
+the second fact outweighs the first.
+
+**Why this mode acts without review.** The prompt-box review exists because a
+misheard sentence can reach a skill that deletes files. Auto-submitting on a wake
+word does not disagree with that; it substitutes a different gate. Pressing a
+button and speaking produces audio the operator recorded, which is weak evidence
+about intent. Saying the assistant's name is an explicit act of address, which is
+stronger. And the layer that actually stops damage was never the review step — it
+is the confirmation gate, which is untouched, so the worst an unreviewed
+mishearing reaches on its own is a read-only skill.
+
 ## What CI verifies
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — 484 tests covering graph routing, the
+`pytest` against `FRIDAY_CORE/tests/` — 523 tests covering graph routing, the
 anomaly guard and its privacy switch, the step bound, the confirmation gate, the
 path allowlist, the mute path with the COM layer stubbed, the server, and a
 regression test for the placeholder-answer failure described above, all run

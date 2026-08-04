@@ -130,6 +130,25 @@ What comes back is put in the prompt box and left there. It is not run.
 Recognition being good is why a mishearing is rare; the review step is why it
 does not matter when it happens, given the skills a request can reach.
 
+The desktop window can also hold the microphone open and act only when addressed
+by name — the wake word mode, off by default. The recorder runs continuously and
+is cut during silence rather than started when speech is detected, because
+detection costs the first fraction of a second of the first word and that word is
+the name. The energy threshold follows the room's noise floor, measured while
+nobody is speaking, so it is neither deaf in a quiet room nor triggered by a fan.
+
+`core/wake_word.py` decides whether an utterance was an address. It matches the
+name fuzzily, because an English-only model renders a proper noun inconsistently
+on an accented voice, but only in the first few words — a name inside a sentence
+is somebody talking about a day of the week, not talking to an assistant. The two
+mistakes cost different amounts: a missed wake word costs one repetition, a false
+trigger runs a turn on a conversation nobody addressed here. Unaddressed speech is
+discarded rather than shown or stored.
+
+In that mode the wake word replaces the prompt-box review, which is a trade rather
+than a relaxation — saying the name is an explicit act of address, and the
+confirmation gate still stands in front of everything destructive.
+
 Speech output is pyttsx3 over the platform voice. It runs on one dedicated
 thread for the life of the process, because the Windows speech API is COM and
 thread-affine: an engine built on one thread and driven from another

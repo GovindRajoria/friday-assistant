@@ -27,20 +27,30 @@ flowchart LR
   hud(["microphone<br/>HUD — Speak button"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
   rec --> stt2["faster-whisper<br/>same model, no wake word"]
   stt2 --> box["prompt box<br/>operator reads it and sends"]
+  wake(["microphone<br/>HUD — always listening"]) --> seg["continuous record,<br/>cut on silence"]
+  seg --> stt3["faster-whisper"]
+  stt3 --> gate{"core/wake_word.py<br/>addressed by name?"}
+  gate -->|"no"| drop(["discarded"])
   kbd(["keypress"]) --> typed["typed input"]
 
-  stt --> reason
-  box --> reason
-  typed --> reason
+  stt --> entry
+  box --> entry
+  typed --> entry
+  gate -->|"yes — name stripped"| entry
 
   subgraph graph["core/graph.py — LangGraph state machine"]
+    entry{"small_talk?"}
+    converse["converse<br/>no schema, no tools"]
     reason["reason<br/>structured output → thought/action"]
     confirm["confirm<br/>human sign-off; denies by default"]
     act["act<br/>skill.execute(params)"]
     guard["anomaly_guard<br/>deterministic privacy rule"]
+    conclude["conclude<br/>out of tool budget; answer anyway"]
     nudge["nudge<br/>action and answer both empty"]
     abort["abort<br/>steps past max_react_steps"]
 
+    entry -->|"just conversation"| converse
+    entry -->|"a real request"| reason
     reason -->|"action set, under step bound"| act
     reason -->|"action is destructive"| confirm
     confirm -->|"approved"| act
@@ -48,12 +58,15 @@ flowchart LR
     reason -->|"action = none, no answer"| nudge
     reason -->|"step bound reached"| abort
     act -->|"action = scan_environment"| guard
+    act -->|"5 tool calls, or 3 on one tool"| conclude
     act -->|"otherwise"| reason
     guard --> reason
     nudge --> reason
   end
 
   reason -->|"action = none, final_answer set"| tts["pyttsx3"] --> spk(["speaker"])
+  converse --> tts
+  conclude --> tts
   abort -.->|"spoken apology, no traceback"| tts
 
   kill(["Delete key"]) -.->|"interrupt flag,<br/>checked each iteration"| graph
@@ -170,6 +183,43 @@ mishearing that goes straight into the graph is a mishearing that can reach a
 skill which deletes files; recognition being good is why that is rare, and the
 review step is why it does not matter when it happens. Correct the word, press
 Enter.
+
+#### Or don't press anything: the wake word
+
+The **Wake word** toggle beside the Speak button holds the microphone open and
+acts when you address it by name — *"Friday, what's the weather"*. It is off by
+default and it is a per-session choice, because a microphone that stays open is
+not something to inherit from a default.
+
+Three things make it work rather than merely function:
+
+**The recorder runs continuously and is cut during silence**, not started when
+speech is detected. Detection takes about 150 milliseconds, and starting a
+recorder then costs the first 150 milliseconds of the first word — which is the
+wake word. `riday, what's the weather` would look like a broken feature when the
+microphone was fine.
+
+**The threshold adapts to the room.** A fixed one is deaf in a quiet room and
+triggers on a fan in a noisy one, so the noise floor is tracked while nobody is
+speaking and the trigger sits a fixed multiple above it. The floor only moves
+during silence, so a long sentence cannot raise it above your own voice.
+
+**The name is matched fuzzily, but only at the start.** `small.en` renders
+"Friday" as "Fry day", "Freeday" or "friyay" often enough to matter on an
+accented voice, so those count — while *"the deadline moved to Friday"* does
+not, because a name used inside a sentence is not an address. The two errors are
+not equally expensive: a missed wake word costs one repetition, and a false
+trigger runs a turn on a conversation with somebody else in the room.
+
+Anything not addressed to it is **discarded** — not run, not shown, not stored.
+A continuous microphone that echoed the room into the HUD would be a transcript
+of the room.
+
+In this mode the review step above is replaced by the wake word itself, which is
+a deliberate trade: hands-free is the whole point, and saying the assistant's
+name is an explicit act of address where a recorded blob is merely audio. The
+confirmation gate is untouched, so the worst an unreviewed mishearing reaches on
+its own is a read-only skill. Rename it with `assistant.wake_word` in settings.
 
 **The model was chosen by measurement.** On this machine — CPU, `int8`, weights
 already downloaded, an 8.58-second utterance:
@@ -816,11 +866,13 @@ Stated plainly, because they are the honest state of the project:
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
 - `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution. Mute is no longer in that category — it goes through CoreAudio, where a target state can be set and then confirmed with `GetMute()` — but its media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it.
 - **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
+- **The wake word's audio half has never been tested against a real voice in a real room.** The decision half is: `core/wake_word.py` is covered from both directions, including the mishearings and the "moved to Friday" false trigger, and the socket gate has tests for acting, ignoring and staying silent. What has *not* been measured is whether the energy threshold and the 850 ms silence cut behave on this operator's voice, microphone and room — whether it cuts people off mid-sentence, misses a quiet question, or wakes on a television. Those constants (`SPEECH_MULTIPLIER`, `SILENCE_MS_TO_END` in `desktop/src/hooks/useAlwaysListening.ts`) were reasoned about and not tuned, and tuning them needs a person talking, not a test.
+- **Continuous listening transcribes every utterance in the room, locally.** Nothing leaves the machine and unaddressed speech is discarded rather than stored — but it *is* transcribed before it can be discarded, which costs roughly a quarter of one CPU core while anyone is talking, and means the model sees speech that was not meant for it. A dedicated wake-word model would only process audio after a trigger; that was considered and rejected for this build because openWakeWord ships no pretrained "friday" and training one is its own project.
 - **The voice path is verified in two halves that have not yet been joined end to end.** The server half: a real WebM/Opus blob sent over the socket to a live backend came back correctly transcribed in 3.6s, and started no turn. The renderer half: pressing the control really does open the microphone and put the HUD into its recording state, observed in the live DOM — and the control is present and enabled in the *packaged* build too, confirmed the same way, since a Chromium window on this platform does not screenshot faithfully. What has not been measured is a spoken sentence going in one end and the right words coming out the other — and none of the renderer audio code (`getUserMedia`, `MediaRecorder`, the permission prompt, the global hotkey) has any automated coverage. Talking to it is the only check that counts.
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
 - **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs four hundred and eighty-four pytest cases against the graph, the guard and its privacy switch, the confirmation gate, all three path allowlists, `run_command`'s boundary, the transcription path, the mute path with the COM layer stubbed, the skill descriptions, and the server — four hundred and eighty-three on a machine that cannot create symlinks, where one allowlist case skips, which is what the development machine does — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs five hundred and twenty-three pytest cases against the graph, the guard and its privacy switch, the confirmation gate, all three path allowlists, `run_command`'s boundary, the transcription path, the mute path with the COM layer stubbed, the skill descriptions, and the server — five hundred and twenty-two on a machine that cannot create symlinks, where one allowlist case skips, which is what the development machine does — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
 - `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.
