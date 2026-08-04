@@ -129,6 +129,23 @@ proactive:
   quiet_start: "22:00"
   quiet_end: "07:00"
 
+privacy:
+  # The camera anomaly rule: more than one person in frame, or the workstation
+  # out of frame. core/nodes/anomaly_guard.py always detects it. What it does
+  # about it is your choice — it used to mute system audio unconditionally,
+  # which is a real intervention to inherit from a default.
+  #
+  # auto_mute true                   -> mute the system, and say so
+  # auto_mute false, announce_only true  -> say so, change nothing (default)
+  # auto_mute false, announce_only false -> the guard stays silent entirely
+  #
+  # announce_only is read only when auto_mute is false; it is not a second off
+  # switch for the muting. Note the mute is not persisted across restarts, so
+  # turning auto_mute off while the machine is muted leaves it muted — ask for
+  # an unmute once.
+  auto_mute: false
+  announce_only: true
+
 filesystem:
   # skills/os_control/manage_files.py (Phase 6) refuses to touch anything
   # outside these directories — resolved with Path.resolve() and checked

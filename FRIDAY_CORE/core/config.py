@@ -126,6 +126,21 @@ DEFAULTS = {
         "quiet_start": "22:00",
         "quiet_end": "07:00",
     },
+    "privacy": {
+        # The camera anomaly rule — more than one person in frame, or the
+        # workstation out of frame — used to mute system audio unconditionally.
+        # It was a defensible default and it was never the operator's choice,
+        # so the detection stays and the intervention is now opt-in.
+        #
+        # Precedence, because the second name invites the wrong reading:
+        #   auto_mute True                    -> mute, and say so
+        #   auto_mute False, announce_only T  -> say so, touch nothing (default)
+        #   auto_mute False, announce_only F  -> the guard is silent entirely
+        # announce_only is only consulted when auto_mute is False; it is not a
+        # second off switch for the muting.
+        "auto_mute": False,
+        "announce_only": True,
+    },
     "filesystem": {
         # skills/os_control/manage_files.py refuses to touch anything outside
         # these directories. This is the layer beneath the confirmation gate,

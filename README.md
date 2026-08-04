@@ -37,7 +37,7 @@ flowchart LR
     reason["reason<br/>structured output → thought/action"]
     confirm["confirm<br/>human sign-off; denies by default"]
     act["act<br/>skill.execute(params)"]
-    guard["anomaly_guard<br/>deterministic mute rule"]
+    guard["anomaly_guard<br/>deterministic privacy rule"]
     nudge["nudge<br/>action and answer both empty"]
     abort["abort<br/>steps past max_react_steps"]
 
@@ -487,6 +487,46 @@ model-supplied parameter that routing never sees. Splitting the skill in four
 to get finer-grained gating was considered and rejected as more manifest
 surface than the convenience is worth.
 
+### The camera privacy rule
+
+After every `scan_environment`, `core/nodes/anomaly_guard.py` checks two
+conditions: more than one person in frame, or the workstation missing from the
+detections. Either one is an anomaly, and the state latches until a scan reports
+exactly one person with the laptop back — hysteresis, so a single bad frame does
+not flip it back and forth. The check is plain Python that runs every time, not
+a sentence in the system prompt.
+
+What it *does* about an anomaly is configuration, and the useful default is the
+quiet one:
+
+```yaml
+privacy:
+  auto_mute: false      # mute system audio on an anomaly
+  announce_only: true   # read only when auto_mute is false
+```
+
+| `auto_mute` | `announce_only` | Behaviour |
+|---|---|---|
+| `false` | `true` | Says what it saw, changes nothing — **the default** |
+| `true` | ignored | Mutes system audio and says so |
+| `false` | `false` | The guard is silent entirely |
+
+It muted unconditionally in earlier versions. That was a defensible rule and the
+wrong thing to inherit without asking: an assistant reaching into the machine's
+audio because a webcam frame looked crowded is an intervention, and
+interventions should be chosen. The detection is unchanged — it was never the
+part that was wrong.
+
+When muting is enabled it goes through the CoreAudio interface, which can set a
+*target* state and confirm it afterwards with `GetMute()`. The media-key
+fallback beneath it only toggles, so it is used only when the current state can
+be read and is wrong; a state that cannot be read is reported as a failure
+rather than guessed at. The narration reports what the call actually returned,
+so FRIDAY does not claim to have muted anything it did not mute.
+
+The mute is not persisted anywhere. Turning `auto_mute` off on a machine the old
+behaviour has already muted leaves it muted — ask for an unmute once.
+
 ---
 
 ## Writing a skill
@@ -640,7 +680,7 @@ FRIDAY_CORE/
 ├── benchmarks/              YOLO11 / OpenVINO export, and stt_models.py for the STT comparison
 ├── tools/
 │   └── check_manifests.py   Static manifest validation; what CI runs
-├── tests/                   pytest — graph routing, the anomaly guard, the step bound, the server
+├── tests/                   pytest — graph routing, the anomaly guard, the mute path, the step bound, the server
 ├── config/
 │   └── settings.example.yaml
 ├── requirements.txt
@@ -669,13 +709,13 @@ the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 Stated plainly, because they are the honest state of the project:
 
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
-- `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution.
+- `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution. Mute is no longer in that category — it goes through CoreAudio, where a target state can be set and then confirmed with `GetMute()` — but its media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it.
 - **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
 - **The voice path is verified in two halves that have not yet been joined end to end.** The server half: a real WebM/Opus blob sent over the socket to a live backend came back correctly transcribed in 3.6s, and started no turn. The renderer half: pressing the control really does open the microphone and put the HUD into its recording state, observed in the live DOM. What has not been measured is a spoken sentence going in one end and the right words coming out the other — and none of the renderer audio code (`getUserMedia`, `MediaRecorder`, the permission prompt, the global hotkey) has any automated coverage. Talking to it is the only check that counts.
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
 - **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.
-- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and twenty-eight pytest cases against the graph, the guard, the confirmation gate, the path allowlist, the transcription path and the server — one hundred and twenty-seven on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
+- **Nothing that needs a model, a microphone or a camera is tested.** CI lints, compiles, validates every skill manifest, and runs one hundred and forty-one pytest cases against the graph, the guard and its privacy switch, the confirmation gate, the path allowlist, the transcription path, the mute path with the COM layer stubbed, and the server — one hundred and forty on a machine that cannot create symlinks, where one allowlist case skips — real gates, but all of them run against fake skills and a mocked model client. The reasoning loop against a real model, speech recognition, synthesis, and every skill's `execute()` are exercised only by hand.
 - **The confirmation gate stops execution, not proposals.** A local model can still decide to delete something it should not; what the gate guarantees is that a human sees the actual call and says yes before it runs. It is a backstop for judgment, not a content filter, and a human who approves without reading has bypassed it entirely.
 - The gate's granularity is one flag per skill, not per action. `manage_files` is wholly destructive, so listing a directory or reading a file prompts for confirmation exactly like deleting one does. Correct, but noisier than it needs to be.
 - `send_keys` types into whatever currently has keyboard focus, which is not necessarily what the operator believes has focus. It presses keys; it does not know what is listening. Nothing verifies the target window before the keystrokes go out.

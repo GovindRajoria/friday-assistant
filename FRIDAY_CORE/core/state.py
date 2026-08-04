@@ -21,7 +21,10 @@ class AgentState(TypedDict, total=False):
     steps: int                     # the bound that brain.py never had on chaining
     narration: Annotated[list[str], add]   # everything to speak / stream to the HUD
     detections: dict[str, int]     # structured output of the last scan
-    anomaly_active: bool           # latched by the guard, cleared only by "exactly 1 person"
+    # Latched by the guard once announced, cleared only by "exactly 1 person"
+    # plus the laptop. It tracks the anomaly, not the audio: whether anything
+    # was muted depends on privacy.auto_mute, which defaults off.
+    anomaly_active: bool
     screen_context: str            # ambient VLM description (Phase 4)
     # Identity of the tool call `act` most recently executed, as
     # "name:{sorted json params}". Only used to notice that the model has

@@ -266,14 +266,58 @@ cannot open quietly.
 ## Protocols hardcoded in the system prompt
 
 The old `brain.py` embedded behavioural rules directly in the prompt string,
-and `core/prompts.py` still does — minus one of them. The anomaly rule (mute
-audio when a scan sees more than one person *or* fails to see the laptop, and
-hold the mute until a scan reports exactly one person *and* the laptop
-together again) used to be a sentence in that string with no enforcement
-behind it at all. It is not prompt text anymore: `core/nodes/anomaly_guard.py`
-runs the same rule in Python after every scan whether or not the model
-cooperates, and its two halves are two functions, `_is_anomalous` and
-`_is_clear`, each testable with a dict of counts and no model in the loop.
+and `core/prompts.py` still does — minus one of them. The anomaly rule (react
+when a scan sees more than one person *or* fails to see the laptop, and hold
+that state until a scan reports exactly one person *and* the laptop together
+again) used to be a sentence in that string with no enforcement behind it at
+all. It is not prompt text anymore: `core/nodes/anomaly_guard.py` runs the same
+rule in Python after every scan whether or not the model cooperates, and its two
+halves are two functions, `_is_anomalous` and `_is_clear`, each testable with a
+dict of counts and no model in the loop.
+
+## Reversed: the privacy guard no longer mutes by default
+
+The rule above originally muted system audio whenever it fired. That part is now
+`privacy.auto_mute`, and it defaults to **false**.
+
+The reversal came from the operator, in the plainest possible terms: *"it mutes
+the volume when it detects more than 2 person but i didn't told it to do that."*
+The rule was not wrong about what it saw and the enforcement was not buggy. What
+was wrong was the shape of the decision. Muting the machine is an intervention
+with an audible consequence and no visible cause, arrived at by inference from a
+webcam frame, and it was switched on for everybody because it seemed prudent when
+it was written. Prudent is not the same as chosen.
+
+So the two halves are split. Detection stays exactly as deterministic as it was —
+that was never the complaint, and weakening it would have been the wrong fix.
+What changes is that the default response is to *say* what it noticed and touch
+nothing. `privacy.auto_mute` restores the old behaviour for anyone who wanted it;
+`privacy.announce_only` set false switches the guard off completely.
+
+Two smaller things fell out of it, both of the same kind — the guard was making
+claims it had not checked:
+
+- The narration said "Audio muted until the area is clear" **unconditionally**,
+  discarding the skill's return value. With `media_control` unloaded or failing,
+  FRIDAY reported an intervention that never happened. It now narrates what the
+  call actually returned.
+- `media_control` reached for the CoreAudio COM interface and, when that
+  appeared unavailable, fell back to pressing the mute **media key**. The key is
+  a toggle, so "mute" applied to an already-muted machine unmuted it, and the
+  guard's latch could disagree with the real audio state. The COM path was in
+  fact never available: newer `pycaw` returns a wrapped `AudioDevice` from
+  `GetSpeakers()` rather than the raw `IMMDevice`, so the code's check for an
+  `Activate` method failed every time and silently took the fallback on every
+  call. Both shapes are handled now, the state is verified with `GetMute()`
+  after being set, and the keypath is only used when the current state can be
+  read and is wrong. A state that cannot be read is reported as a failure
+  instead of guessed at — an unverifiable toggle is worse than an honest refusal
+  when the thing being toggled is whether the machine can be heard.
+
+The lesson generalises past audio: a deterministic guard is the right way to
+enforce a rule, and it does not by itself make the rule's *content* someone
+else's choice. `enabled` on the proactive layer had already been argued this way;
+this one had to be retrofitted.
 
 What is still true, and argued the same way as before: the R&D chain that
 sequences search → analyse → draft → log, and the instruction to do
@@ -309,10 +353,11 @@ written to steer, not to document.
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — eleven tests covering graph routing,
-the anomaly guard, the step bound, and a regression test for the
-placeholder-answer failure described above, all run against fake skills and a
-mocked `llm_client.chat`, no model required.
+`pytest` against `FRIDAY_CORE/tests/` — 141 tests covering graph routing, the
+anomaly guard and its privacy switch, the step bound, the confirmation gate, the
+path allowlist, the mute path with the COM layer stubbed, the server, and a
+regression test for the placeholder-answer failure described above, all run
+against fake skills and a mocked `llm_client.chat`, no model required.
 
 `requirements.txt` is still deliberately not installed in full. It pulls
 `ultralytics`, `torch`, `faster-whisper`, `pyttsx3` and `pynput` — gigabytes of

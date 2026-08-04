@@ -40,7 +40,7 @@ through all of them, and a stream of state updates as each node finishes.
 
 There are six nodes. `reason` asks the model what to do next. `confirm` stops
 and asks a human before anything destructive. `act` executes the chosen skill.
-`anomaly_guard` enforces the privacy rule after a camera scan. `nudge` handles
+`anomaly_guard` applies the privacy rule after a camera scan. `nudge` handles
 a reply that chose neither a tool nor an answer, and `abort` ends a chain that
 has run too long. Routing between them is plain Python reading fields off the
 state.
@@ -148,11 +148,19 @@ Confirmation stops a human rubber-stamping a bad request; the allowlist stops
 a confused model from being able to propose one against a system directory in
 the first place.
 
-The privacy guard: after a camera scan, `core/nodes/anomaly_guard.py` mutes
-system audio if more than one person is in frame or the workstation is absent.
-It is plain Python that runs every time, and it latches until a scan reports
-exactly one person. It used to be a sentence in the system prompt, which meant
-it fired when the model felt like it.
+The privacy guard: after a camera scan, `core/nodes/anomaly_guard.py` notices
+when more than one person is in frame or the workstation is absent. It is plain
+Python that runs every time, and it latches until a scan reports exactly one
+person. It used to be a sentence in the system prompt, which meant it fired
+when the model felt like it.
+
+Detection and response are separate settings. The guard announces what it saw;
+whether it also mutes system audio is `privacy.auto_mute`, which defaults off.
+It muted unconditionally at first, and that was the wrong shape for a default —
+an assistant reaching into the machine's audio state is an intervention to be
+chosen, not inherited. `privacy.announce_only` set false silences the guard
+entirely. Muting, when enabled, goes through the CoreAudio interface so the
+resulting state is set and verified rather than toggled.
 
 The network boundary: the server refuses to bind to anything but a loopback
 address, and it has no authentication because it is not reachable. The desktop
