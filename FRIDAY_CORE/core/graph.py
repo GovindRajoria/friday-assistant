@@ -157,10 +157,18 @@ def dispatch_node(state: AgentState, active_skills: dict) -> dict:
 
     Returns the same shape `reason_node` does, so everything downstream — the
     confirmation lookup, `act`, the `terminal` flag, the step count — behaves
-    exactly as it would had the model picked this tool. `messages` is left
-    untouched: if the chosen skill is not terminal and the turn continues, the
-    next `reason` step builds the message list from scratch, which is already
-    what it does on the first pass.
+    exactly as it would had the model picked this tool.
+
+    EVERY DISPATCHED SKILL MUST BE `terminal`, and
+    tests/test_intents.py asserts it rather than trusting it. This node sets no
+    `messages`, because there is no model exchange to record — but `act` appends
+    its observation to whatever is there, so a non-terminal skill would route on
+    to `reason` with a message list holding one observation and *no system prompt
+    and no question*. `reason` only builds those when the list is empty, so it
+    would not recover; it would ask the model to continue a conversation whose
+    first line is an answer to a question it cannot see. All five skills reachable
+    from here return the complete reply, so the situation does not arise today,
+    and the test is what keeps a sixth rule from creating it.
 
     See core/intents.py for the measurement that made this a node rather than a
     prompt rule. `thought` is written here rather than generated because it is

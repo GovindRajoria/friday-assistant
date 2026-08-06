@@ -192,7 +192,17 @@ def report(summary, results):
 
 
 def compare(previous_path, results, summary):
-    """What moved. The delta is the whole reason this file exists."""
+    """What moved. The delta is the whole reason this file exists.
+
+    Two figures, and the second is the one to quote. Overall accuracy is scored
+    against each run's own denominator, so two runs are only comparable if they
+    could reach the same cases — and the moment a skill is added, the later run
+    can reach more of the answer key. `61.6% -> 64%` across a change that adds
+    `world_time` mixes "questions nobody could answer are now answerable" with
+    "routing changed", which is exactly the conflation the unavailable mechanism
+    exists to prevent. So the intersection of what BOTH runs could reach is
+    scored separately: that one says whether routing itself moved.
+    """
     previous = json.loads(Path(previous_path).read_text(encoding="utf-8"))
     before = {entry["say"]: entry for entry in previous["results"]}
     print("\n" + "-" * 78)
@@ -200,6 +210,15 @@ def compare(previous_path, results, summary):
           f"{previous['summary']['accuracy']}% -> {summary['accuracy']}% "
           f"({previous['summary']['hit']}/{previous['summary']['comparable']} -> "
           f"{summary['hit']}/{summary['comparable']} comparable)")
+
+    shared = [entry for entry in results
+              if entry["available"] and before.get(entry["say"], {}).get("available")]
+    if shared:
+        was = sum(1 for entry in shared if before[entry["say"]]["correct"])
+        now = sum(1 for entry in shared if entry["correct"])
+        print(f"  Same cases, like for like: {was}/{len(shared)} -> {now}/{len(shared)}"
+              f"  ({round(100 * was / len(shared), 1)}% -> {round(100 * now / len(shared), 1)}%)"
+              "   <- the figure that says whether routing moved")
 
     regressions, fixes, newly = [], [], []
     for entry in results:

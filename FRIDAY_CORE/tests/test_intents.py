@@ -134,31 +134,57 @@ def test_a_rule_naming_an_unloaded_skill_falls_through_to_the_model():
     assert intents.route("who are you", available={"weather": object()}) is None
 
 
-def test_every_rule_names_a_skill_that_exists_in_the_project():
-    """A typo in a skill name here is a route to nothing.
+def _declared_manifests():
+    """Every skill's {name: manifest-ish dict} read statically off the source.
 
-    Read off the manifests statically rather than by importing the registry,
-    which would need every skill's dependencies installed.
+    An AST parse rather than `discover_skills()`, which would need every skill's
+    dependencies installed — the same reason tools/check_manifests.py is static.
+    Only literal keys and values are recovered, which is all any manifest in this
+    project uses.
     """
     import ast
-    from pathlib import Path
 
     from core.config import PROJECT_ROOT
 
-    declared = set()
+    found = {}
     for path in (PROJECT_ROOT / "skills").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
                 continue
+            literal = {}
             for key, value in zip(node.keys, node.values):
-                if (isinstance(key, ast.Constant) and key.value == "name"
-                        and isinstance(value, ast.Constant) and isinstance(value.value, str)):
-                    declared.add(value.value)
+                if isinstance(key, ast.Constant) and isinstance(value, ast.Constant):
+                    literal[key.value] = value.value
+            if isinstance(literal.get("name"), str) and "description" in literal:
+                found[literal["name"]] = literal
+    assert found, "no manifests were parsed at all — the AST walk is broken, not the router"
+    return found
 
+
+def test_every_rule_names_a_skill_that_exists_in_the_project():
+    """A typo in a skill name here is a route to nothing."""
+    declared = _declared_manifests()
     named = {skill for _, skill, _ in intents.RULES}
-    assert named <= declared, f"intents.py routes to skills that do not exist: {named - declared}"
-    assert Path(PROJECT_ROOT / "skills").is_dir()
+    assert named <= set(declared), f"intents.py routes to skills that do not exist: {named - set(declared)}"
+
+
+def test_every_dispatched_skill_ends_the_turn():
+    """`terminal: True` on all of them is an invariant, not a coincidence.
+
+    `dispatch_node` sets no `messages`, because there is no model exchange to
+    record. `act` then appends its observation to that empty list, so a
+    NON-terminal skill would route on to `reason` holding one observation and no
+    system prompt and no question — and `reason` only builds those when the list
+    is empty, so it could not recover. All five are terminal today. This is what
+    stops a sixth rule from quietly introducing that state.
+    """
+    declared = _declared_manifests()
+    not_terminal = sorted(skill for _, skill, _ in intents.RULES
+                          if not declared[skill].get("terminal"))
+    assert not not_terminal, (
+        "intents.py dispatches to skills that do not end the turn, which would reach `reason` "
+        f"with no system prompt: {not_terminal}")
 
 
 def test_small_talk_is_checked_before_this_router():
