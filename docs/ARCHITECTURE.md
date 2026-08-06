@@ -38,12 +38,21 @@ supplies the part that is genuinely hard to hand-roll: an explicit graph of
 nodes with conditional edges between them, one typed state object threaded
 through all of them, and a stream of state updates as each node finishes.
 
-There are six nodes. `reason` asks the model what to do next. `confirm` stops
+There are ten nodes. `reason` asks the model what to do next. `confirm` stops
 and asks a human before anything destructive. `act` executes the chosen skill.
 `anomaly_guard` applies the privacy rule after a camera scan. `nudge` handles
-a reply that chose neither a tool nor an answer, and `abort` ends a chain that
-has run too long. Routing between them is plain Python reading fields off the
-state.
+a reply that chose neither a tool nor an answer, `abort` ends a chain that has
+run too long, `finish` ends one where the skill's own output was the answer,
+and `conclude` makes it answer from what it has when the tool budget runs out.
+Routing between them is plain Python reading fields off the state.
+
+Two nodes are reached before the model is consulted at all. `converse` answers
+conversation — a greeting goes there and cannot call a tool, because the tool
+is not offered. `dispatch` answers questions about FRIDAY itself by choosing
+the skill in Python: the registry, the architecture document, the turn log and
+the health probes all hold true answers, and the model's own account of itself
+is a confident guess about assistants in general. Both gates exist because
+asking failed repeatedly and measurably; see the Skills section for the number.
 
 What makes that routing reliable is that the model's reply is structured
 output, not prose. `core/registry.py` derives a JSON Schema from the loaded
@@ -93,6 +102,17 @@ descriptions are *distinguishable*, which is the failure that matters at this
 count — nothing breaks, and the model reaches for the wrong tool. Competing
 pairs therefore name each other explicitly, and `tests/test_skill_routing_surface.py`
 pins those disambiguations so a later edit cannot quietly drop one.
+
+How often it picks the right one is now measured rather than assumed.
+`tools/routing_bench.py` scores a labelled set of seventy-eight spoken requests
+against the live registry, and the first run answered a question this project
+had avoided for a long time: **56%**. Adding the deterministic route for
+self-knowledge questions took it to **62%**, and the part still decided by the
+model alone sits at **49%**. That is the honest state of it. The largest
+remaining failure is not ignorance but attention — several skills that lose a
+routing decision already carry a description naming the skill that should have
+won, so the model is not reading forty-five descriptions carefully enough for
+the disambiguation to land.
 
 Skills cover reading files on the disk (documents, spreadsheets, text off the
 screen by OCR), the web (search, news, weather, page reading, opening a link),
