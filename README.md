@@ -24,9 +24,8 @@ Built May 2026.
 ```mermaid
 flowchart LR
   mic(["microphone<br/>console"]) --> stt["faster-whisper<br/>wake word + STT"]
-  hud(["microphone<br/>HUD — Speak button"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
+  hud(["microphone<br/>HUD — Ctrl+Shift+Space"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
   rec --> stt2["faster-whisper<br/>same model, no wake word"]
-  stt2 --> box["prompt box<br/>operator reads it and sends"]
   wake(["microphone<br/>HUD — always listening"]) --> seg["continuous record,<br/>cut on silence"]
   seg --> stt3["faster-whisper"]
   stt3 --> gate{"core/wake_word.py<br/>addressed by name?"}
@@ -34,13 +33,14 @@ flowchart LR
   kbd(["keypress"]) --> typed["typed input"]
 
   stt --> entry
-  box --> entry
+  stt2 -->|"the press is the address"| entry
   typed --> entry
   gate -->|"yes — name stripped"| entry
 
   subgraph graph["core/graph.py — LangGraph state machine"]
-    entry{"small_talk?"}
+    entry{"small_talk?<br/>a known intent?"}
     converse["converse<br/>no schema, no tools"]
+    dispatch["dispatch<br/>core/intents.py — routed<br/>without asking the model"]
     reason["reason<br/>structured output → thought/action"]
     confirm["confirm<br/>human sign-off; denies by default"]
     act["act<br/>skill.execute(params)"]
@@ -50,7 +50,9 @@ flowchart LR
     abort["abort<br/>steps past max_react_steps"]
 
     entry -->|"just conversation"| converse
-    entry -->|"a real request"| reason
+    entry -->|"a question about itself"| dispatch
+    entry -->|"anything else"| reason
+    dispatch -->|"same gates as a chosen action"| act
     reason -->|"action set, under step bound"| act
     reason -->|"action is destructive"| confirm
     confirm -->|"approved"| act
@@ -171,25 +173,36 @@ binary, so the frame needs no envelope of its own.
 Two ways in, one recogniser.
 
 The console entry point opens the microphone itself and waits for the wake
-word. The desktop window records with the browser's `MediaRecorder` when the
-**Speak** button or **Ctrl+Shift+Space** is pressed, and sends the WebM/Opus
-blob down the WebSocket it already has open; `core/transcriber.py` decodes and
-transcribes it with the same faster-whisper model the console uses.
-Chromium's own `SpeechRecognition` API is deliberately not used — it uploads
-audio to Google, which would quietly end the local-first claim.
+word. The desktop window records with the browser's `MediaRecorder` when
+**Ctrl+Shift+Space** is pressed, and sends the WebM/Opus blob down the
+WebSocket it already has open; `core/transcriber.py` decodes and transcribes it
+with the same faster-whisper model the console uses. Chromium's own
+`SpeechRecognition` API is deliberately not used — it uploads audio to Google,
+which would quietly end the local-first claim.
 
-**What comes back is put in the prompt box and left there.** It is not run. A
-mishearing that goes straight into the graph is a mishearing that can reach a
-skill which deletes files; recognition being good is why that is rare, and the
-review step is why it does not matter when it happens. Correct the word, press
-Enter.
+**What comes back is run.** Speaking is asking; there is nothing to press
+afterwards. Until August 2026 the text landed in the prompt box and waited for a
+click, which was a real review step — a mishearing could not become a request
+until a human had read it — and it also meant talking to this assistant was
+slower than typing to it.
 
-#### Or don't press anything: the wake word
+What stands in its place: every destructive skill still stops at the
+confirmation gate, so the worst a mishearing reaches unaided is read-only;
+**Stop** is live for the length of a turn; and what it heard is printed in the
+transcript directly above what it did about it.
 
-The **Wake word** toggle beside the Speak button holds the microphone open and
-acts when you address it by name — *"Friday, what's the weather"*. It is off by
-default and it is a per-session choice, because a microphone that stays open is
-not something to inherit from a default.
+#### Or leave it listening: the wake word
+
+The one **Voice** control on the command bar holds the microphone open and acts
+when you address it by name — *"Friday, what's the weather"*. It is off on a
+fresh install, because a microphone that stays open is not something to inherit
+from a default; once you turn it on, it is remembered across restarts.
+
+There used to be two buttons here, **Speak** and **Wake word**. One control
+replaced them because two made the operator choose which kind of microphone they
+wanted before they had said anything, which is a question about this program's
+internals dressed up as a question about their intent. Push-to-talk kept the
+hotkey and lost its button.
 
 Three things make it work rather than merely function:
 

@@ -14,7 +14,6 @@ describe("reducer", () => {
       transcript: [],
       screenContext: "",
       pendingConfirmation: null,
-      dictation: null,
     });
   });
 
@@ -194,32 +193,30 @@ describe("reducer", () => {
     expect(interrupted.pendingConfirmation).toEqual({ name: "manage_files", input: {} });
   });
 
-  it("offers a heard sentence for review instead of starting a turn", () => {
-    const thinking = reducer(initialState, { kind: "prompt_sent" });
-    const heard = reducer(thinking, {
-      kind: "agent_event",
-      event: { type: "transcript", payload: { text: "what is the weather" } },
-      id: "id-4",
-    });
-    // No turn has begun — the sentence is sitting in the prompt box.
+  it("shows a heard sentence as a turn already starting", () => {
+    // Replaces an assertion that this event did NOT start a turn, which was
+    // true until speech began auto-submitting. The backend emits `transcript`
+    // immediately before running what it heard, so the orb moving here is the
+    // first feedback a hands-free operator gets — and they are, by definition,
+    // not looking at the prompt box.
+    const heard = agentEvent({ type: "transcript", payload: { text: "what is the weather" } });
     expect(heard.orb).toBe("thinking");
-    expect(heard.dictation).toEqual({ id: "id-4", text: "what is the weather" });
     // And it is in the log, so a misheard question can be found afterwards.
     expect(heard.transcript[0].text).toBe("what is the weather");
+    expect(heard.transcript[0].type).toBe("transcript");
   });
 
-  it("registers the same sentence heard twice as two dictations", () => {
-    // The id is carried alongside the text for exactly this: comparing on
-    // text alone would swallow the second one, and the prompt box would sit
-    // there unchanged looking like the microphone had failed.
-    const first = agentEvent({ type: "transcript", payload: { text: "read the news" } });
-    const second = reducer(first, {
+  it("returns to idle when a heard sentence is refused by single-flight", () => {
+    // The one path that emits `transcript` and then no turn: the backend was
+    // busy. It says so with a `status`, which is already terminal, so the orb
+    // must not be left claiming to think about a request that never ran.
+    const heard = agentEvent({ type: "transcript", payload: { text: "read the news" } });
+    const refused = reducer(heard, {
       kind: "agent_event",
-      event: { type: "transcript", payload: { text: "read the news" } },
+      event: { type: "status", payload: { text: "I heard you, but I am still working on the last thing." } },
       id: "id-2",
     });
-    expect(first.dictation).toEqual({ id: "id-1", text: "read the news" });
-    expect(second.dictation).toEqual({ id: "id-2", text: "read the news" });
+    expect(refused.orb).toBe("idle");
   });
 
   it("does not clear a pending confirmation when something is heard", () => {
@@ -246,7 +243,6 @@ describe("reducer", () => {
       transcript: [],
       screenContext: "",
       pendingConfirmation: null,
-      dictation: null,
     });
   });
 });

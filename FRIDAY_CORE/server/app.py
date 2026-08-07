@@ -464,6 +464,23 @@ async def _drain_proactive_events() -> None:
             _speak_proactive(text)
 
 
+def _say(text: str) -> None:
+    """Speak something that did not come out of a turn's event stream.
+
+    `_run_prompt`'s `emit` is what speaks the events of a turn, so anything said
+    before a turn exists — a refusal, most of all — reaches the HUD and nothing
+    else. That was tolerable while every request began with a keystroke and the
+    operator was therefore looking at the window. Hands-free breaks the
+    assumption: a refusal they can only read is one they will not notice, and
+    they will simply say it again into a microphone that is still busy.
+
+    No quiet-hours check, unlike _speak_proactive: this is an answer to something
+    the operator just said out loud, and somebody talking at 03:00 is awake.
+    """
+    if _speech is not None:
+        _speech.speak(text)
+
+
 def _speak_proactive(text: str) -> None:
     """Say it out loud, unless it is the middle of the night.
 
@@ -585,33 +602,42 @@ async def _run_and_release(text: str) -> None:
 
 
 async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
-    """Transcribe one recorded utterance and either report it or act on it.
+    """Transcribe one recorded utterance and run it as a turn.
 
-    **Push-to-talk (`ambient=False`) reports; it does not run.** The text is
-    broadcast as a `transcript` event and lands in the HUD's prompt box, where
-    the operator reads it and presses send. Feeding it straight into the graph
-    would be one keystroke shorter and would mean a misheard sentence becomes a
-    request this assistant acts on — and the actions available to it include
-    deleting files. Recognition being good is the reason that rarely happens;
-    the review step is the reason it does not matter when it does.
+    **Speaking is asking.** Both microphone paths run what they heard; neither
+    parks it anywhere for a second gesture. Until 2026-08-07 push-to-talk
+    broadcast the text and stopped, so a spoken request needed a click to
+    actually happen — which is most of the point of speaking gone, and the
+    operator said so.
 
-    **Always-listening (`ambient=True`) runs, but only when addressed.** The
-    review step is replaced by a different gate: the operator has to have said
-    the assistant's name at the start of the sentence. That is a deliberate
-    trade rather than a relaxation — hands-free is the entire point of the mode,
-    and a wake word is an explicit act of address, where a push-to-talk
-    transcript is merely audio the operator happened to record. Everything
-    destructive still stops at the confirmation gate, so the worst a mishearing
-    reaches on its own is a read-only skill.
+    The review step it removes was a real safety layer, so it is *replaced*
+    rather than dropped. Three things stand where it stood:
+
+      * Every `destructive` skill stops at the confirmation gate before it
+        runs (core/nodes/confirm.py), so the worst a mishearing reaches on its
+        own is read-only.
+      * `Stop` is live for the length of a turn, so a turn that started from a
+        mishearing can be ended without waiting for it.
+      * The transcript event still arrives first and is still logged, so what
+        it thought it heard is on screen next to what it did about it.
+
+    **Push-to-talk (`ambient=False`) runs everything it hears.** It cannot
+    hear the answer to its own question: `useMicrophone` ships the recording
+    from `recorder.onstop`, which releases the microphone tracks *before*
+    handing the bytes over, and nothing reopens the stream without another
+    press. That fact is load-bearing — a mode whose microphone is shut while
+    the assistant is talking cannot feed its own answer back in.
+
+    **Always-listening (`ambient=True`) runs only when addressed**, by name.
+    Its microphone *is* open while audio plays, and SAPI plays out of process
+    where the stream's echo cancellation cannot reach it, so the wake word is
+    the only thing standing between an answer and being re-heard as a request.
+    Do not relax it without a temporal gate to put in its place.
 
     Anything not addressed to the assistant is **discarded silently** — not
     broadcast, not logged, not stored. A continuous microphone that echoed
     every overheard sentence back into the HUD would be a transcript of the
     room, which is not something this project should produce.
-
-    Not gated on `_busy` either. Hearing is not a turn: transcribing while an
-    answer is still streaming is fine, and the operator can line up their
-    next sentence while they wait.
     """
     try:
         text = await _transcribe(audio)
@@ -633,27 +659,30 @@ async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
             await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
         return
 
-    if not ambient:
-        await _broadcast(events.envelope(events.TRANSCRIPT, {"text": text}))
-        return
+    if ambient:
+        from core.wake_word import find
 
-    from core.wake_word import find
+        addressed, command = find(text, SETTINGS["assistant"].get("wake_word", "friday"))
+        if not addressed:
+            return                  # room noise; nothing said, nothing kept
+        # The name alone is a request for attention. Handed on as "yes?", which
+        # the conversational entry point answers in one line without a tool.
+        spoken = command or "yes?"
+    else:
+        # A deliberate recording is addressed by the act of recording it, so no
+        # wake word is required — saying the name into the push-to-talk button
+        # would be a password, not an address.
+        spoken = text
 
-    addressed, command = find(text, SETTINGS["assistant"].get("wake_word", "friday"))
-    if not addressed:
-        return                      # room noise; nothing said, nothing kept
-
-    # The name alone is a request for attention. Handed on as "yes?", which the
-    # conversational entry point answers in one line without touching a tool.
-    spoken = command or "yes?"
     await _broadcast(events.envelope(events.TRANSCRIPT, {"text": spoken}))
 
     global _busy
     if _busy:
-        # Single-flight, exactly as a typed prompt is. Saying so is better than
-        # dropping it silently, because the operator spoke and heard nothing.
-        await _broadcast(events.envelope(events.STATUS,
-                                        {"text": "I heard you, but I am still working on the last thing."}))
+        # Single-flight, exactly as a typed prompt is — and said out loud, not
+        # just broadcast: whoever spoke may not be looking at the window.
+        refusal = "I heard you, but I am still working on the last thing."
+        await _broadcast(events.envelope(events.STATUS, {"text": refusal}))
+        _say(refusal)
         return
 
     # Set here, before the await, and cleared by _run_and_release. Checking the

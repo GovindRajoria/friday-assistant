@@ -35,11 +35,6 @@ export interface HudState {
   // clicking anything — a stale prompt left rendered after that would offer
   // to approve or deny a question nobody is waiting on anymore.
   pendingConfirmation: ActionPayload | null;
-  // The last thing the microphone was heard to say, waiting to be put in the
-  // prompt box. Carries the event's id alongside the text, not the text
-  // alone: saying the same sentence twice must still register as a second
-  // dictation, and `text === previousText` would swallow it.
-  dictation: { id: string; text: string } | null;
 }
 
 export const initialState: HudState = {
@@ -48,7 +43,6 @@ export const initialState: HudState = {
   transcript: [],
   screenContext: "",
   pendingConfirmation: null,
-  dictation: null,
 };
 
 export type HudAction =
@@ -102,10 +96,16 @@ function orbForEvent(type: AgentEventType, previous: OrbState): OrbState {
       // backend is still blocked waiting on that answer.
       return previous;
     case "transcript":
-      // Being heard is not the same as being asked. The sentence goes to the
-      // prompt box and waits there for the operator to send it, so no turn
-      // has begun and the orb has no business moving yet.
-      return previous;
+      // Being heard IS being asked, as of the auto-submit change: the backend
+      // emits this immediately before running the turn. Moving the orb here
+      // rather than waiting for the first `thought` is what makes a spoken
+      // request look answered-in-progress straight away, which matters most in
+      // the mode where nobody is looking at the prompt box.
+      //
+      // Safe against the one path that emits this and then stops — a turn
+      // rejected by single-flight — because that rejection is a `status`, and
+      // `status` returns the orb to idle.
+      return "thinking";
     default:
       // screen_context lands here too, though in practice the reducer
       // never calls this function for it — it is intercepted earlier in
@@ -151,13 +151,6 @@ export function reducer(state: HudState, action: HudAction): HudState {
       };
       if (action.event.type === "confirmation_required") {
         return { ...next, pendingConfirmation: action.event.payload };
-      }
-      if (action.event.type === "transcript") {
-        // Also appended to the log above, deliberately: what the microphone
-        // was heard to say is part of the record of the session, and the one
-        // thing worth being able to scroll back to when an answer looks like
-        // it addressed a different question entirely.
-        return { ...next, dictation: { id: action.id, text: action.event.payload.text } };
       }
       if (action.event.type === "answer" || action.event.type === "error") {
         // Covers the "server gave up" path: a 60s unanswered confirmation

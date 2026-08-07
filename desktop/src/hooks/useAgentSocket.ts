@@ -97,9 +97,10 @@ export function useAgentSocket() {
   }, []);
 
   // Tells the backend how to read the binary frames that follow: a deliberate
-  // recording to be transcribed into the prompt box for review, or room audio to
-  // be gated on the wake word and acted on. It is a mode rather than a per-frame
-  // flag because a binary WebSocket frame has nowhere to carry one.
+  // recording, run as-is because pressing the key is itself the address, or room
+  // audio to be gated on the wake word first. Both are run; the mode decides what
+  // has to be true before they are. It is a mode rather than a per-frame flag
+  // because a binary WebSocket frame has nowhere to carry one.
   const sendListenMode = useCallback((ambient: boolean) => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) return;
     socketRef.current.send(JSON.stringify({ type: "listen_mode", ambient }));

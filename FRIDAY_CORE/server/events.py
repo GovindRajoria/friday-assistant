@@ -30,11 +30,12 @@ CONFIRMATION_REQUIRED = "confirmation_required"
 # ANSWER because it is not the end of a turn: no question preceded it, the orb
 # must not move, and a pending confirmation must not be cleared by it.
 PROACTIVE = "proactive"
-# What the operator was heard to say. Emitted after an utterance recorded in
-# the HUD has been transcribed, and deliberately NOT the same thing as the
-# turn starting: the text lands in the prompt box for the operator to look at
-# and send, because a mishearing that runs straight into the graph is a
-# mishearing that can reach a destructive skill.
+# What the operator was heard to say. Emitted once an utterance recorded in the
+# HUD has been transcribed, immediately before the turn it becomes runs — so it
+# is the record of what was heard, not a request for permission to act on it.
+# It stays a separate type from ANSWER's siblings for two reasons: the HUD
+# renders it as the operator's own line rather than the assistant's, and a turn
+# rejected by single-flight emits this and then nothing else.
 TRANSCRIPT = "transcript"
 
 ALL_TYPES = frozenset({

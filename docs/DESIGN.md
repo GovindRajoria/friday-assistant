@@ -488,6 +488,42 @@ stronger. And the layer that actually stops damage was never the review step —
 is the confirmation gate, which is untouched, so the worst an unreviewed
 mishearing reaches on its own is a read-only skill.
 
+**Why the review step went entirely (2026-08-07).** The paragraph above ends up
+proving more than it set out to. If the confirmation gate is the layer that stops
+damage, and an act of address is what distinguishes a request from ambient audio,
+then a press is an act of address too — a deliberate one — and the review step
+was buying very little at the cost of making speech slower than typing. The
+operator's own verdict was blunter: *"what's the point of speaking if I have to
+click to send that."* Both microphone paths now run what they heard.
+
+The two paths still differ in what they require, and it is not an inconsistency.
+Push-to-talk needs no name because the press is the address; ambient mode does,
+because a microphone open for an hour has nothing else to separate a request from
+the room. They also differ in what they can *hear*: `useMicrophone` releases the
+device inside `recorder.onstop`, before the recording is even sent, so
+push-to-talk cannot capture the answer to its own question. Ambient mode's
+microphone is open while the answer plays, and the platform voice plays out of
+process where `echoCancellation` on the capture stream cannot reach it — so in
+that mode the wake word is also the only thing stopping the assistant from
+hearing itself and replying to it. Relaxing it needs a temporal gate in its place.
+
+**Why one control replaced two.** The command bar had **Speak** and **Wake
+word** side by side, and the operator's complaint about the arrangement was the
+arrangement. Two controls for one capability make somebody decide which kind of
+microphone they want before they have said anything — a question about this
+program's internals wearing the clothes of a question about their intent. There
+is one control now, showing off / listening / hearing you / working, and
+push-to-talk kept its hotkey and lost its button. `src/voice.ts` derives that
+state in a pure function so the precedence between those states can be asserted;
+the case worth asserting is that a running turn outranks "hearing you", because
+the open microphone genuinely is picking up the assistant's own voice at that
+moment and saying so reads as a malfunction.
+
+Dropping the button did leave one real hole: if another application already
+holds `Ctrl+Shift+Space`, push-to-talk had no way in at all. The renderer now
+listens for the same combination itself, which covers exactly the case the
+global registration cannot — this window having focus.
+
 ## What CI verifies
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`

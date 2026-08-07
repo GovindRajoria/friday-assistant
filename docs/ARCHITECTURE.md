@@ -141,14 +141,22 @@ accented speech.
 
 There are two ways in. The console entry point captures the microphone itself
 and listens for a wake word. The desktop window records with the browser's
-MediaRecorder when the Speak button or the global hotkey is pressed, and
-sends the encoded audio down the WebSocket it already has open; the Python
+MediaRecorder, either continuously or for one utterance on the global hotkey,
+and sends the encoded audio down the WebSocket it already has open; the Python
 side transcribes it with the same model. The browser's own SpeechRecognition
 API is deliberately not used — on Chromium it uploads audio to Google.
 
-What comes back is put in the prompt box and left there. It is not run.
-Recognition being good is why a mishearing is rare; the review step is why it
-does not matter when it happens, given the skills a request can reach.
+**What comes back is run.** Until August 2026 it was put in the prompt box and
+left there for the operator to read and send, and that review step was a real
+safety layer: a mishearing could not become a request until a human had looked
+at it. It was removed because it also meant speaking to this assistant was
+slower than typing to it, which is most of the reason to speak at all.
+
+Three things stand where it stood. Every destructive skill still stops at the
+confirmation gate before it runs, so the worst a mishearing reaches unaided is
+read-only. `Stop` is live for the length of a turn. And the transcript event
+still arrives first and is still logged, so what it heard is on screen beside
+what it did about it.
 
 The desktop window can also hold the microphone open and act only when addressed
 by name — the wake word mode, off by default. The recorder runs continuously and
@@ -165,9 +173,21 @@ mistakes cost different amounts: a missed wake word costs one repetition, a fals
 trigger runs a turn on a conversation nobody addressed here. Unaddressed speech is
 discarded rather than shown or stored.
 
-In that mode the wake word replaces the prompt-box review, which is a trade rather
-than a relaxation — saying the name is an explicit act of address, and the
-confirmation gate still stands in front of everything destructive.
+The name is required in that mode and not in the other, which is not an
+inconsistency: a press is itself an act of address, and a microphone that has
+been open for an hour has nothing else to distinguish a request from the room.
+It also matters that the two modes differ in what they can hear. Push-to-talk
+releases the microphone before the recording is even sent, so it cannot capture
+the answer to its own question. The continuous mode's microphone is open while
+the answer plays out of a speaker, and the platform voice plays out of process
+where the audio stream's echo cancellation cannot reach it — so the wake word is
+also the only thing stopping this assistant from hearing itself and replying.
+
+One control in the window covers both. It shows whether the microphone is open,
+whether something is being picked up, and whether a turn is running, because a
+switch that silently means "the microphone is live" is the wrong switch for
+this. The state it was left in is remembered across a restart; absent, it is
+off, so a fresh install never opens the microphone on its own.
 
 Speech output is pyttsx3 over the platform voice. It runs on one dedicated
 thread for the life of the process, because the Windows speech API is COM and

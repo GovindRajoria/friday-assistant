@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmationPrompt } from "./components/ConfirmationPrompt";
-import { ListenToggle } from "./components/ListenToggle";
-import { MicButton } from "./components/MicButton";
 import { ProfileEditor } from "./components/ProfileEditor";
 import { PromptInput } from "./components/PromptInput";
 import { Reactor } from "./components/Reactor";
@@ -10,11 +8,20 @@ import { StatusBar } from "./components/StatusBar";
 import { SystemsPanel } from "./components/SystemsPanel";
 import { TitleBar } from "./components/TitleBar";
 import { Transcript } from "./components/Transcript";
+import { VoiceControl } from "./components/VoiceControl";
 import { useAgentSocket } from "./hooks/useAgentSocket";
 import { useHealth } from "./hooks/useHealth";
 import { useAlwaysListening } from "./hooks/useAlwaysListening";
 import { useMicrophone } from "./hooks/useMicrophone";
 import "./App.css";
+
+// Whether the microphone was left open last time. Persisted so a restart does
+// not silently drop the operator back to a dead command bar after they chose
+// hands-free — but stored rather than defaulted: absent means off, so the very
+// first run of a fresh install never opens the microphone on its own. That is
+// the same argument useAlwaysListening.ts makes in its header, and this is the
+// line where it would have been easiest to quietly reverse.
+const LISTENING_PREFERENCE = "friday.listening";
 
 export function App() {
   const { state, sendPrompt, sendAudio, sendListenMode, sendCancel, sendConfirm } = useAgentSocket();
@@ -50,6 +57,7 @@ export function App() {
     if (listening) {
       stopListening();
       sendListenMode(false);
+      window.localStorage.removeItem(LISTENING_PREFERENCE);
       return;
     }
     if (micState.kind === "recording" || micState.kind === "opening") stopRecording();
@@ -57,7 +65,22 @@ export function App() {
     // is ever read under the wrong interpretation.
     sendListenMode(true);
     startListening();
+    window.localStorage.setItem(LISTENING_PREFERENCE, "on");
   }, [listening, micState.kind, sendListenMode, startListening, stopListening, stopRecording]);
+
+  // Reopen the microphone on launch if that is where it was left. Gated on the
+  // socket being up, because sendListenMode on a dead socket is dropped and the
+  // backend would then read the frames that follow as push-to-talk recordings —
+  // no wake word, every overheard sentence run as a request. The ref makes it
+  // once per connection rather than once per render.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current || !state.connected) return;
+    restoredRef.current = true;
+    if (window.localStorage.getItem(LISTENING_PREFERENCE) !== "on") return;
+    sendListenMode(true);
+    startListening();
+  }, [state.connected, sendListenMode, startListening]);
 
   // If the socket drops, tell the backend again when it returns: listen mode is
   // per-connection state there, so a reconnect silently reverts it to
@@ -72,6 +95,21 @@ export function App() {
   // the press here; the recording itself stays in the renderer, because that
   // is where the microphone is.
   useEffect(() => window.friday?.onToggleDictation?.(toggleRecording), [toggleRecording]);
+
+  // The same combination again, handled in the renderer, which fires only when
+  // this window already has focus. That used to be the one case where reaching
+  // for the button was never the problem — but the button is gone, so if another
+  // application holds the global registration (main.ts reports that and carries
+  // on) push-to-talk would have had no way in at all. This is that way in.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.code !== "Space") return;
+      event.preventDefault();
+      toggleRecording();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [toggleRecording]);
 
   return (
     <div className="hud">
@@ -127,18 +165,16 @@ export function App() {
           onCancel={sendCancel}
           disabled={!state.connected}
           busy={state.orb === "thinking"}
-          dictation={state.dictation}
         >
-          <ListenToggle
-            state={listeningState}
+          {/* One control for the whole capability. Push-to-talk kept its global
+              hotkey and lost its button — see src/voice.ts for why two was the
+              wrong number. */}
+          <VoiceControl
+            listening={listeningState}
+            mic={micState}
+            busy={state.orb === "thinking"}
             onToggle={toggleAlwaysListening}
             disabled={!state.connected}
-          />
-          <MicButton
-            state={micState}
-            onStart={startRecording}
-            onStop={stopRecording}
-            disabled={!state.connected || listening}
           />
         </PromptInput>
       </footer>

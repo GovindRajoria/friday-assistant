@@ -841,50 +841,17 @@
   color: var(--red);
 }
 
-/* The microphone. A live recording is the one state in this window where
-   something is being captured off the operator's hardware, so it is the
-   loudest thing on the bar while it lasts. */
-.command__button--mic {
+/* The voice control — one button, several states. It can leave the microphone
+   open indefinitely, which is the one state in this window where the operator's
+   hardware is capturing without them having just asked for it, so an open
+   microphone is never allowed to look like a closed one at a glance. */
+.command__button--voice {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 }
 
-.command__mic-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.5;
-}
-
-.command__button--mic-live {
-  border-color: rgba(255, 107, 107, 0.6);
-  background: rgba(255, 107, 107, 0.12);
-  color: var(--red);
-}
-
-.command__button--mic-live .command__mic-dot {
-  opacity: 1;
-  animation: mic-pulse 1.1s ease-in-out infinite;
-}
-
-@keyframes mic-pulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.55); }
-  50% { opacity: 0.45; box-shadow: 0 0 0 5px rgba(255, 107, 107, 0); }
-}
-
-/* The always-listening toggle. Deliberately a different colour from the
-   push-to-talk button: red there means "recording this one utterance now",
-   whereas this one means "the microphone is open indefinitely", and conflating
-   the two would hide the state that matters more. */
-.command__button--wake {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.command__wake-dot {
+.command__voice-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -892,28 +859,49 @@
   opacity: 0.45;
 }
 
-.command__button--wake-live {
+/* Open, in either mode. Teal rather than the red the push-to-talk button used
+   to use: red read as "this one utterance is being captured now", and the state
+   that matters more here is the longer-lived one. */
+.command__button--voice-live {
   border-color: rgba(94, 234, 212, 0.55);
   background: rgba(94, 234, 212, 0.1);
   color: var(--cyan, #5eead4);
 }
 
-/* Awake but nobody talking: a slow breath, so an open microphone is never
-   mistaken for an idle one at a glance. */
-.command__button--wake-live .command__wake-dot {
+/* Open but nobody talking: a slow breath. */
+.command__button--voice-live .command__voice-dot {
   opacity: 1;
-  animation: wake-breathe 2.6s ease-in-out infinite;
+  animation: voice-breathe 2.6s ease-in-out infinite;
 }
 
-/* Someone is speaking right now — faster, and it is the only difference
-   between "open" and "picking you up", which is worth being able to see. */
-.command__button--wake-hearing .command__wake-dot {
-  animation: wake-breathe 0.7s ease-in-out infinite;
+/* Picking you up right now — faster, and it is the only difference between
+   "open" and "hearing you", which is worth being able to see. */
+.command__button--voice-hearing .command__voice-dot {
+  animation: voice-breathe 0.7s ease-in-out infinite;
 }
 
-@keyframes wake-breathe {
+/* A deliberate one-shot recording from the hotkey. Kept red, and kept distinct
+   from the hands-free states: this one ends by itself and the operator started
+   it a second ago, so the two should never be confused for one another. */
+.command__button--voice-recording {
+  border-color: rgba(255, 107, 107, 0.6);
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--red);
+}
+
+.command__button--voice-recording .command__voice-dot {
+  opacity: 1;
+  animation: voice-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes voice-breathe {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.5); }
   50% { opacity: 0.4; box-shadow: 0 0 0 5px rgba(94, 234, 212, 0); }
+}
+
+@keyframes voice-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.55); }
+  50% { opacity: 0.45; box-shadow: 0 0 0 5px rgba(255, 107, 107, 0); }
 }
 
 /* ------------------------------------------------------------- scrollbars */
