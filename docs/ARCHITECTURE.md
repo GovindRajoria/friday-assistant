@@ -123,11 +123,17 @@ on what the skill is for.
 That last change also demonstrated the cost of the approach. Strengthening
 `media_control` did not just win its own cases: it began winning "minimise this
 window", "kill the chrome process" and "type this into the document" from its
-terser neighbours in the same family. Rewriting a description moves the attractor
-rather than removing it, which is evidence for the same conclusion the misses
-already pointed at — the problem is attention across forty-seven descriptions,
-not missing information in any one of them. A per-turn shortlist is the change
-that would address that, and it is not built.
+terser neighbours in the same family. The obvious repair — a clause naming
+exactly those four things as not its business — was measured and changed nothing
+at all: 70.5% before and after, with two cases moving off `media_control` and two
+others moving on to a different wrong tool. It was removed rather than kept,
+because it spends tokens in every prompt to relabel which answer is wrong.
+
+Rewriting a description therefore moves the attractor rather than removing it,
+which is evidence for the same conclusion the misses already pointed at — the
+problem is attention across forty-seven descriptions, not missing information in
+any one of them. A per-turn shortlist is the change that would address it, and it
+is not built.
 
 Skills cover reading files on the disk (documents, spreadsheets, text off the
 screen by OCR), the web (search, news, weather, page reading, opening a link),

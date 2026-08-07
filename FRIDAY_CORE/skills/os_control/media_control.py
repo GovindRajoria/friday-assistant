@@ -52,6 +52,18 @@ class MediaControlSkill:
             # loud, quiet, sound, speakers — cannot win that comparison. The last
             # sentence is the distinction the model kept getting wrong: this skill
             # is the machine's audio, not the assistant's voice.
+            #
+            # It won all three, and then started winning "minimise this window",
+            # "kill the chrome process" and "type this into the document" from its
+            # terser neighbours here in os_control. A negative clause was tried
+            # against exactly those — "nothing to do with windows, processes,
+            # keystrokes, the screen, or finding where something is defined in
+            # code" — and measured **no change at all**: 70.5% before, 70.5%
+            # after, with two cases moving off this skill and two others moving on
+            # to a different wrong answer. It was removed rather than kept, since
+            # it spends tokens in every prompt to relabel which tool is wrong. Do
+            # not re-add it expecting a different result; the remaining misses are
+            # attention across forty-seven descriptions, not a missing disclaimer.
             "description": (
                 "Changes how loud the machine's speakers are, and controls whatever is "
                 "playing on them. Use this for: turn the volume up or down, make it louder "
