@@ -10,7 +10,12 @@ class MemoryManagerSkill:
     def __init__(self):
         self.manifest = {
             "name": "manage_memory",
-            "description": "Stores or retrieves permanent facts. 'action' MUST be 'store' or 'retrieve'. 'topic' MUST be a SINGLE, broad keyword (e.g., 'deployments', 'vids', 'brother'). NEVER use multiple words for the topic. 'fact_data' MUST be the ENTIRE complete sentence the user wants remembered.",
+            # The word "remember" did not appear anywhere in this description,
+            # which is the only word anybody uses when asking for it: "remember
+            # that I prefer metric units", "don't forget my sister's birthday".
+            # It described the implementation — storing and retrieving facts —
+            # rather than the request.
+            "description": "Remembers something for later, and recalls what it was told to remember. Use this when asked to remember, note down, keep in mind, or not forget a fact, preference or detail, and when asked what it remembers about something. 'action' MUST be 'store' or 'retrieve'. 'topic' MUST be a SINGLE, broad keyword (e.g., 'deployments', 'vids', 'brother'). NEVER use multiple words for the topic. 'fact_data' MUST be the ENTIRE complete sentence the user wants remembered.",
             "parameters": ["action", "topic", "fact_data"]
         }
         # Anchor to the project root so the vault does not follow the cwd.

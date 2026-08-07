@@ -70,6 +70,15 @@ rewording, and a tool that does not exist cannot be named. Before this, the
 loop matched an `Action:` line out of free text, and a stray markdown bullet
 was enough to drop the call.
 
+The list of skills in that schema is not the whole registry. `core/shortlist.py`
+scores the loaded skills against the request and offers about ten of them, in
+both the prompt and the enum — forty-seven descriptions is eight thousand tokens
+and the model was demonstrably not reading them. The subset is derived from the
+question rather than carried in the state, so it is identical on every step of a
+chain; an enum that gained or lost members halfway through would let the model
+name a tool on one step that it could not name on the next. The Skills section
+below has the measurement.
+
 The schema keeps a required `thought` field, which is the reason for choosing
 it over the model's native function-calling. Native tool calls give a function
 name and an argument object and throw the plan away; for an assistant whose
@@ -115,9 +124,10 @@ How often it picks the right one is now measured rather than assumed.
 `tools/routing_bench.py` scores a labelled set of seventy-eight spoken requests
 against the live registry, and the first run answered a question this project
 had avoided for a long time: **56%**. A deterministic route for self-knowledge
-questions took it to **62%**, and the voice work of 2026-08-07 to **70.5%** —
-**68.5%** counting only the cases both runs could reach, which is the figure that
-says whether routing moved rather than whether the answer key became answerable.
+questions took it to **62%**, the voice work of 2026-08-07 to **70.5%**, and the
+per-turn shortlist described below to **84.6%**. Every figure quoted here is
+like-for-like — scored only on the cases both runs could reach, which is what says
+whether routing moved rather than whether the answer key became answerable.
 
 Three changes account for that, and none of them was a better prompt. Two skills
 that did not exist were built, so five cases stopped being unanswerable. The local
@@ -138,10 +148,42 @@ others moving on to a different wrong tool. It was removed rather than kept,
 because it spends tokens in every prompt to relabel which answer is wrong.
 
 Rewriting a description therefore moves the attractor rather than removing it,
-which is evidence for the same conclusion the misses already pointed at — the
-problem is attention across forty-seven descriptions, not missing information in
-any one of them. A per-turn shortlist is the change that would address it, and it
-is not built.
+which pointed at the same conclusion the misses already suggested: the problem is
+attention across forty-seven descriptions, not missing information in any one of
+them.
+
+**That turned out to be right, and acting on it took routing from 70.5% to
+84.6%** — the largest single move this project has measured, and the figure is
+like-for-like, the same cases both runs could reach. `core/shortlist.py` scores
+the loaded skills against the request and puts roughly ten of them in the system
+prompt and in the enum instead of all forty-seven. Nothing about the descriptions
+changed. The model was reading a list too long to read, and every one of the
+long-standing misses went away at once: "kill the chrome process", "lock the
+screen", "restart the machine", "open notepad", "minimise this window", "is my
+code committed", "find where set_volume is defined". So did the arithmetic case
+that had resisted three schema changes — asked how many bytes are in a gigabyte
+it now answers without reaching for a tool at all.
+
+The scoring is lexical, weighted by inverse document frequency across the
+manifests themselves, which is what makes it work: "use" and "this" appear in
+every description and count for nothing, while "clipboard" and "commit" appear in
+one and count for a great deal. It is lexical rather than semantic because there
+is no embedding model installed here, and pulling one to rank forty-seven short
+documents would be a large dependency for a small job.
+
+**The failure it must not have is omitting the right tool**, because the enum is
+built from the same subset — a skill that is not in the list cannot be named,
+however obvious the request. Two rules guard that. If nothing scores above a
+floor, the whole registry is returned, since a ranking built on noise is worse
+than no ranking. And the size was measured rather than chosen: every case in the
+labelled set keeps its correct answer inside a list of eight, so ten ships, and
+`tests/test_shortlist.py` fails if that stops being true. That test needs no
+model, so unlike the benchmark it runs in CI.
+
+Two descriptions were rewritten on the strength of that recall test rather than
+the other way round. `system_check` did not contain the word "machine" and
+`manage_memory` did not contain "remember" — the only words anybody actually says
+when asking for them appeared nowhere in the text being ranked.
 
 Skills cover reading files on the disk (documents, spreadsheets, text off the
 screen by OCR), the web (search, news, weather, page reading, opening a link),

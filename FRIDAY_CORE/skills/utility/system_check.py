@@ -11,7 +11,15 @@ class SystemCheckSkill:
             # be the only one, and "how is the machine doing" now has five
             # plausible answers.
             "description": (
-                "Checks the current CPU and RAM usage of the system. Use this for a quick "
+                # "How is the machine doing" is how this gets asked out loud, and
+                # the description contained none of those words — not "machine",
+                # not "computer", not "slow". Adding the vocabulary somebody
+                # actually uses to the skill that is genuinely the right answer is
+                # not the same as the description tuning that was measured moving
+                # the attractor around; that was a skill claiming ground next to
+                # it, this is a skill failing to claim its own.
+                "Checks how the machine is doing right now: current CPU and RAM usage, "
+                "whether the computer is busy or running slow. Use this for a quick "
                 "load reading only — disk_report for storage, network_status for "
                 "connectivity, gpu_status for accelerators, and diagnose_self when the "
                 "question is whether everything is working."

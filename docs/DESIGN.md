@@ -507,6 +507,59 @@ process where `echoCancellation` on the capture stream cannot reach it — so in
 that mode the wake word is also the only thing stopping the assistant from
 hearing itself and replying to it. Relaxing it needs a temporal gate in its place.
 
+**Why the fix for routing was fewer tools rather than better descriptions.** This
+is the one the project spent the longest getting wrong, and the record of the
+wrong turns is more useful than the answer.
+
+Tool selection measured 56% with forty-six skills loaded. Four attempts to improve
+it by giving the model *more* information all failed, and each failed in an
+instructive way. A schema field asking whether a tool was needed before choosing
+which — three variants, one of them taking routing to 39.7%, because the model
+writes the whole object as a script of a finished interaction rather than as a
+classification of the request. Sharper descriptions on the losing skills, which
+worked per skill and moved the attractor to their neighbours. A negative clause
+naming the cases that had been stolen, which changed the score by exactly nothing.
+
+The clue was there the whole time and was easy to misread: several skills that
+*lost* a routing decision already carried a description naming the skill that
+should have won. `system_check` says "gpu_status for accelerators" and still beat
+`gpu_status` on "is the GPU being used". The information was present, correctly
+worded, in the prompt, and not used — which is a statement about attention, not
+about content. Forty-seven descriptions is roughly eight thousand tokens of JSON.
+
+Offering about ten scored skills instead of all forty-seven took routing from
+**70.5% to 84.6%**, like-for-like, with no description changed. Every long-running
+miss cleared at once, including the arithmetic case that had survived three schema
+redesigns: asked how many bytes are in a gigabyte, it now answers without a tool.
+
+Three decisions inside it are worth keeping:
+
+- **Lexical scoring, weighted by inverse document frequency over the manifests.**
+  There is no embedding model installed on this machine, and adding one to rank
+  forty-seven short documents would be a large dependency for a small job. IDF is
+  what makes the lexical version work at all — it prices "use" and "this" at zero
+  because every manifest contains them, and "clipboard" highly because one does.
+- **No confident match, no shortlist.** If nothing scores above a floor the whole
+  registry is offered. The enum is built from the same subset, so a skill left out
+  is not merely ranked badly, it is unnameable — and a ranking built on noise is
+  strictly worse than no ranking.
+- **The size was measured, not chosen.** Every case in the labelled set keeps its
+  correct answer inside a list of eight; ten ships for margin, and a test asserts
+  that recall with no model running, so it is a CI gate rather than a benchmark.
+
+Two descriptions were rewritten because that recall test failed on them, which is
+the opposite of the earlier tuning: `system_check` contained no occurrence of the
+word "machine" and `manage_memory` none of "remember", so the only words anybody
+says when asking for them appeared nowhere in the text being ranked. Adding a word
+the skill genuinely is about is not the same as a skill claiming ground next to it.
+
+**What this does not fix.** The shortlist is computed from the operator's words
+alone, so a chain whose second step needs a tool the original sentence did not
+imply can find it missing. No case in the labelled set does that, and the cheap
+answer — widen the list after the first step, since growing an enum is safe where
+shrinking it is not — is deliberately unbuilt, because there is no measurement
+saying it is needed.
+
 **Why the clock is in the prompt and not only a skill.** Nothing in this project
 reported the time until August 2026 — no skill, and no date anywhere in either
 prompt. "What time is it" is close to the most common thing anyone says to an

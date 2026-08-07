@@ -3,9 +3,9 @@
     "cases": 78,
     "comparable": 78,
     "unavailable": 0,
-    "hit": 55,
-    "accuracy": 70.5,
-    "seconds": 162.0,
+    "hit": 66,
+    "accuracy": 84.6,
+    "seconds": 123.2,
     "groups": {
       "greetings and small talk": {
         "hit": 7,
@@ -18,7 +18,7 @@
         "unavailable": 0
       },
       "no tool needed": {
-        "hit": 0,
+        "hit": 1,
         "of": 5,
         "unavailable": 0
       },
@@ -33,17 +33,17 @@
         "unavailable": 0
       },
       "reading what is in front of it": {
-        "hit": 5,
+        "hit": 6,
         "of": 7,
         "unavailable": 0
       },
       "the machine": {
-        "hit": 8,
+        "hit": 11,
         "of": 11,
         "unavailable": 0
       },
       "development": {
-        "hit": 3,
+        "hit": 6,
         "of": 6,
         "unavailable": 0
       },
@@ -53,7 +53,7 @@
         "unavailable": 0
       },
       "destructive, must still route right": {
-        "hit": 0,
+        "hit": 3,
         "of": 4,
         "unavailable": 0
       },
@@ -69,12 +69,12 @@
         "of": 7
       },
       "model": {
-        "hit": 37,
-        "of": 60
+        "hit": 46,
+        "of": 58
       },
       "dispatch": {
-        "hit": 11,
-        "of": 11
+        "hit": 13,
+        "of": 13
       }
     }
   },
@@ -157,11 +157,11 @@
       "expect": [
         "converse"
       ],
-      "chose": "none",
+      "chose": "voice_control",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 9.63
+      "seconds": 9.41
     },
     {
       "group": "greetings and small talk",
@@ -181,11 +181,11 @@
       "expect": [
         "converse"
       ],
-      "chose": "voice_control",
+      "chose": "none",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.8
+      "seconds": 4.2
     },
     {
       "group": "itself",
@@ -328,11 +328,11 @@
       "expect": [
         "none"
       ],
-      "chose": "world_time",
+      "chose": "web_search",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.51
+      "seconds": 3.03
     },
     {
       "group": "no tool needed",
@@ -340,11 +340,11 @@
       "expect": [
         "none"
       ],
-      "chose": "translate",
-      "correct": false,
+      "chose": "none",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.78
+      "seconds": 1.92
     },
     {
       "group": "no tool needed",
@@ -352,11 +352,11 @@
       "expect": [
         "none"
       ],
-      "chose": "explain_architecture",
+      "chose": "gpu_status",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.83
+      "seconds": 1.5
     },
     {
       "group": "no tool needed",
@@ -364,11 +364,11 @@
       "expect": [
         "none"
       ],
-      "chose": "explain_architecture",
+      "chose": "web_search",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.92
+      "seconds": 1.46
     },
     {
       "group": "no tool needed",
@@ -376,11 +376,11 @@
       "expect": [
         "none"
       ],
-      "chose": "explain_architecture",
+      "chose": "search_files",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.68
+      "seconds": 2.76
     },
     {
       "group": "the clock",
@@ -391,9 +391,9 @@
       ],
       "chose": "world_time",
       "correct": true,
-      "decided_by": "model",
+      "decided_by": "dispatch",
       "available": true,
-      "seconds": 2.48
+      "seconds": 0.0
     },
     {
       "group": "the clock",
@@ -404,9 +404,9 @@
       ],
       "chose": "world_time",
       "correct": true,
-      "decided_by": "model",
+      "decided_by": "dispatch",
       "available": true,
-      "seconds": 1.83
+      "seconds": 0.0
     },
     {
       "group": "the clock",
@@ -418,7 +418,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.84
+      "seconds": 1.75
     },
     {
       "group": "the clock",
@@ -430,7 +430,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.19
+      "seconds": 1.96
     },
     {
       "group": "the clock",
@@ -439,11 +439,11 @@
         "world_time",
         "none"
       ],
-      "chose": "world_time",
+      "chose": "none",
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.36
+      "seconds": 1.97
     },
     {
       "group": "current and outside",
@@ -455,7 +455,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.79
+      "seconds": 1.73
     },
     {
       "group": "current and outside",
@@ -467,7 +467,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.77
+      "seconds": 1.48
     },
     {
       "group": "current and outside",
@@ -479,7 +479,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 6.38
+      "seconds": 1.43
     },
     {
       "group": "current and outside",
@@ -492,7 +492,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 4.13
+      "seconds": 1.77
     },
     {
       "group": "current and outside",
@@ -500,11 +500,11 @@
       "expect": [
         "web_search"
       ],
-      "chose": "web_search",
-      "correct": true,
+      "chose": "search_code",
+      "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 5.59
+      "seconds": 2.05
     },
     {
       "group": "current and outside",
@@ -516,7 +516,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.05
+      "seconds": 1.92
     },
     {
       "group": "current and outside",
@@ -525,11 +525,11 @@
         "open_url",
         "launch_application"
       ],
-      "chose": "media_control",
-      "correct": false,
+      "chose": "open_url",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.65
+      "seconds": 1.78
     },
     {
       "group": "reading what is in front of it",
@@ -537,11 +537,11 @@
       "expect": [
         "read_document"
       ],
-      "chose": "annotate_image",
-      "correct": false,
+      "chose": "read_document",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.6
+      "seconds": 2.3
     },
     {
       "group": "reading what is in front of it",
@@ -549,11 +549,11 @@
       "expect": [
         "read_spreadsheet"
       ],
-      "chose": "task_list",
-      "correct": false,
+      "chose": "read_spreadsheet",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.78
+      "seconds": 2.41
     },
     {
       "group": "reading what is in front of it",
@@ -561,11 +561,11 @@
       "expect": [
         "search_files"
       ],
-      "chose": "search_files",
-      "correct": true,
+      "chose": "search_code",
+      "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.09
+      "seconds": 2.41
     },
     {
       "group": "reading what is in front of it",
@@ -577,7 +577,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.17
+      "seconds": 2.15
     },
     {
       "group": "reading what is in front of it",
@@ -589,7 +589,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.26
+      "seconds": 1.9
     },
     {
       "group": "reading what is in front of it",
@@ -601,7 +601,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.65
+      "seconds": 2.39
     },
     {
       "group": "reading what is in front of it",
@@ -613,7 +613,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.03
+      "seconds": 1.86
     },
     {
       "group": "the machine",
@@ -625,7 +625,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.97
+      "seconds": 1.93
     },
     {
       "group": "the machine",
@@ -637,7 +637,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.08
+      "seconds": 1.54
     },
     {
       "group": "the machine",
@@ -649,7 +649,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.02
+      "seconds": 1.63
     },
     {
       "group": "the machine",
@@ -658,11 +658,11 @@
         "disk_report",
         "system_check"
       ],
-      "chose": "system_check",
+      "chose": "disk_report",
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.71
+      "seconds": 1.63
     },
     {
       "group": "the machine",
@@ -674,7 +674,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.82
+      "seconds": 2.81
     },
     {
       "group": "the machine",
@@ -683,11 +683,11 @@
         "manage_processes",
         "system_check"
       ],
-      "chose": "system_check",
+      "chose": "manage_processes",
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.35
+      "seconds": 2.0
     },
     {
       "group": "the machine",
@@ -695,11 +695,11 @@
       "expect": [
         "launch_application"
       ],
-      "chose": "open_url",
-      "correct": false,
+      "chose": "launch_application",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.09
+      "seconds": 1.66
     },
     {
       "group": "the machine",
@@ -707,11 +707,11 @@
       "expect": [
         "window_control"
       ],
-      "chose": "media_control",
-      "correct": false,
+      "chose": "window_control",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.78
+      "seconds": 1.63
     },
     {
       "group": "the machine",
@@ -723,7 +723,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.52
+      "seconds": 1.36
     },
     {
       "group": "the machine",
@@ -731,11 +731,11 @@
       "expect": [
         "power_control"
       ],
-      "chose": "media_control",
-      "correct": false,
+      "chose": "power_control",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.82
+      "seconds": 1.73
     },
     {
       "group": "the machine",
@@ -744,11 +744,11 @@
         "system_check",
         "diagnose_self"
       ],
-      "chose": "diagnose_self",
+      "chose": "system_check",
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.53
+      "seconds": 2.15
     },
     {
       "group": "development",
@@ -757,11 +757,11 @@
         "inspect_repo",
         "run_command"
       ],
-      "chose": "check_camera_stream",
-      "correct": false,
+      "chose": "inspect_repo",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.08
+      "seconds": 1.82
     },
     {
       "group": "development",
@@ -770,11 +770,11 @@
         "inspect_repo",
         "run_command"
       ],
-      "chose": "manage_memory",
-      "correct": false,
+      "chose": "inspect_repo",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.24
+      "seconds": 1.76
     },
     {
       "group": "development",
@@ -782,11 +782,11 @@
       "expect": [
         "search_code"
       ],
-      "chose": "media_control",
-      "correct": false,
+      "chose": "search_code",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.44
+      "seconds": 2.45
     },
     {
       "group": "development",
@@ -798,7 +798,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.05
+      "seconds": 2.12
     },
     {
       "group": "development",
@@ -810,7 +810,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.93
+      "seconds": 2.05
     },
     {
       "group": "development",
@@ -822,7 +822,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.82
+      "seconds": 2.32
     },
     {
       "group": "life admin",
@@ -834,7 +834,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.31
+      "seconds": 2.17
     },
     {
       "group": "life admin",
@@ -844,11 +844,11 @@
         "calendar",
         "reminders"
       ],
-      "chose": "world_time",
-      "correct": false,
+      "chose": "calendar",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.53
+      "seconds": 1.59
     },
     {
       "group": "life admin",
@@ -856,11 +856,11 @@
       "expect": [
         "task_list"
       ],
-      "chose": "task_list",
-      "correct": true,
+      "chose": "none",
+      "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.04
+      "seconds": 2.36
     },
     {
       "group": "life admin",
@@ -872,7 +872,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.89
+      "seconds": 1.63
     },
     {
       "group": "life admin",
@@ -884,7 +884,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.75
+      "seconds": 1.63
     },
     {
       "group": "life admin",
@@ -896,7 +896,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.92
+      "seconds": 1.68
     },
     {
       "group": "life admin",
@@ -908,7 +908,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.98
+      "seconds": 1.86
     },
     {
       "group": "life admin",
@@ -916,11 +916,11 @@
       "expect": [
         "journal"
       ],
-      "chose": "manage_memory",
+      "chose": "none",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 3.06
+      "seconds": 4.33
     },
     {
       "group": "destructive, must still route right",
@@ -928,11 +928,11 @@
       "expect": [
         "manage_files"
       ],
-      "chose": "run_command",
-      "correct": false,
+      "chose": "manage_files",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.0
+      "seconds": 2.29
     },
     {
       "group": "destructive, must still route right",
@@ -940,11 +940,11 @@
       "expect": [
         "manage_processes"
       ],
-      "chose": "media_control",
-      "correct": false,
+      "chose": "manage_processes",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.89
+      "seconds": 1.54
     },
     {
       "group": "destructive, must still route right",
@@ -952,11 +952,11 @@
       "expect": [
         "power_control"
       ],
-      "chose": "system_check",
-      "correct": false,
+      "chose": "power_control",
+      "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.02
+      "seconds": 1.68
     },
     {
       "group": "destructive, must still route right",
@@ -964,11 +964,11 @@
       "expect": [
         "send_keys"
       ],
-      "chose": "media_control",
+      "chose": "draft_document",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.55
+      "seconds": 1.81
     },
     {
       "group": "voice",
@@ -980,7 +980,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.68
+      "seconds": 1.71
     },
     {
       "group": "voice",
@@ -992,7 +992,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.93
+      "seconds": 1.75
     },
     {
       "group": "voice",
@@ -1001,11 +1001,11 @@
         "voice_control",
         "explain_last_turn"
       ],
-      "chose": "screenshot",
+      "chose": "none",
       "correct": false,
       "decided_by": "model",
       "available": true,
-      "seconds": 4.07
+      "seconds": 1.94
     },
     {
       "group": "voice",
@@ -1017,7 +1017,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 1.93
+      "seconds": 1.39
     },
     {
       "group": "voice",
@@ -1030,7 +1030,7 @@
       "correct": true,
       "decided_by": "model",
       "available": true,
-      "seconds": 2.45
+      "seconds": 1.72
     }
   ]
 }
