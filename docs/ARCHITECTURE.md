@@ -90,9 +90,9 @@ data or a device. The `skill_health` skill reads that record back, so a skill
 that vanished can say why instead of simply not being there.
 
 `skills.disabled` in the settings leaves a named skill unloaded. It is an
-escape hatch rather than a feature: there are forty-six skills and no measured
-tool-selection accuracy for any of them, so a group that turns out to confuse
-routing has to be switchable off without editing code.
+escape hatch rather than a feature: there are forty-eight skills, and at that
+count a group that turns out to confuse routing has to be switchable off
+without editing code.
 
 The manifests are what the model routes on, so they are validated in CI by
 `tools/check_manifests.py`: names unique, parameters a list of strings, flags
@@ -106,13 +106,28 @@ pins those disambiguations so a later edit cannot quietly drop one.
 How often it picks the right one is now measured rather than assumed.
 `tools/routing_bench.py` scores a labelled set of seventy-eight spoken requests
 against the live registry, and the first run answered a question this project
-had avoided for a long time: **56%**. Adding the deterministic route for
-self-knowledge questions took it to **62%**, and the part still decided by the
-model alone sits at **49%**. That is the honest state of it. The largest
-remaining failure is not ignorance but attention — several skills that lose a
-routing decision already carry a description naming the skill that should have
-won, so the model is not reading forty-five descriptions carefully enough for
-the disambiguation to land.
+had avoided for a long time: **56%**. A deterministic route for self-knowledge
+questions took it to **62%**, and the voice work of 2026-08-07 to **70.5%** —
+**68.5%** counting only the cases both runs could reach, which is the figure that
+says whether routing moved rather than whether the answer key became answerable.
+
+Three changes account for that, and none of them was a better prompt. Two skills
+that did not exist were built, so five cases stopped being unanswerable. The local
+date and time went into the prompt, which fixed the clock. And two descriptions
+were rewritten on the strength of the measurement: `media_control`'s was one line
+with none of the words anybody uses — loud, quiet, sound, speakers — while
+`manage_settings` advertised "whether you mute audio... how fast you speak" and
+took all three volume cases as a result. A description competes on its words, not
+on what the skill is for.
+
+That last change also demonstrated the cost of the approach. Strengthening
+`media_control` did not just win its own cases: it began winning "minimise this
+window", "kill the chrome process" and "type this into the document" from its
+terser neighbours in the same family. Rewriting a description moves the attractor
+rather than removing it, which is evidence for the same conclusion the misses
+already pointed at — the problem is attention across forty-seven descriptions,
+not missing information in any one of them. A per-turn shortlist is the change
+that would address that, and it is not built.
 
 Skills cover reading files on the disk (documents, spreadsheets, text off the
 screen by OCR), the web (search, news, weather, page reading, opening a link),

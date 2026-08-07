@@ -14,9 +14,11 @@ import pytest
 from tools import routing_bench as bench
 
 # Named in routing_cases.yaml before they exist, so their groups start counting
-# the moment they are built. This list is therefore a to-do: emptying it is the
-# plan's §V.5, and anything else appearing here is a typo.
-NOT_BUILT_YET = {"world_time", "voice_control"}
+# the moment they are built. This list is therefore a to-do, and it is empty:
+# `world_time` and `voice_control` were written on 2026-08-07 and the test below
+# is what said so — it failed the moment the files appeared, which is exactly the
+# job it was left here to do. Anything added here again is a promise to build it.
+NOT_BUILT_YET: set[str] = set()
 
 
 def test_the_answer_key_only_names_skills_that_exist():

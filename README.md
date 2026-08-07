@@ -252,6 +252,25 @@ the turn without starting a new one. That is matched against the whole sentence
 and never as a prefix, so *"stop the build"* is still a request — and, usefully,
 so is its own *"I have stopped the service"* if it hears itself say it.
 
+#### How it sounds
+
+The answer is rewritten before it is spoken. The model writes markdown whether or
+not it was asked to, and a voice pronounces it: `**Ready.**` used to come out as
+"star star ready star star", and a URL as half a minute of "h t t p colon slash
+slash". `core/speech_text.py` takes the markers off and keeps the words, collapses
+a link to "a link", and describes a fenced code block instead of reading twenty
+lines of Python aloud. The HUD still shows the answer as written.
+
+It is also queued one sentence at a time rather than one answer at a time, which
+is what makes interrupting it work at all: the speech engine is COM and
+thread-affine, so `stop()` cannot be called from anywhere but its own thread, and
+emptying a queue is the only lever available. The cost of an interruption is the
+sentence already in flight.
+
+Say **"speak more slowly"** or **"you're too fast"** and it changes rate on the
+next sentence — `core/speaker.py` re-reads the setting before every utterance, so
+the confirmation is spoken at the new speed rather than merely claimed.
+
 In this mode the review step above is replaced by the wake word itself, which is
 a deliberate trade: hands-free is the whole point, and saying the assistant's
 name is an explicit act of address where a recorded blob is merely audio. The
@@ -652,7 +671,7 @@ def setup():
 
 ## Included skills
 
-Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below.
+Forty-eight on disk, forty-seven loaded — `track_price` ships disabled, see below.
 **`destructive`** marks a skill that routes through the confirmation gate;
 **`terminal`** marks one whose output is the whole answer, ending the turn.
 
@@ -707,6 +726,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `skill_health` | Which skills failed to load and why, separating a missing package from missing data — **terminal** |
 | `diagnose_self` | The ten things that have actually gone wrong here, checked in one question — **terminal** |
 | `manage_settings` | Reads and changes its own settings in conversation, from a key allowlist — **destructive**, confirmed |
+| `voice_control` | How it speaks: faster, slower, a rate in words per minute, aloud or not, which voices are installed — **terminal** |
 
 ### The machine
 
@@ -718,7 +738,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `manage_processes` | Lists processes, or ends one by name — refuses its own tree and critical system processes. **destructive**, confirmed |
 | `power_control` | Lock, sleep, restart, shut down — the last two delayed and abortable. **destructive**, confirmed |
 | `launch_application` | Opens desktop applications, with per-OS executable name mapping |
-| `media_control` | System volume and playback control (Windows) |
+| `media_control` | System volume and playback: sets a level exactly through CoreAudio, steps up and down, mutes, pauses, skips (Windows) |
 | `window_control` | Lists, focuses, minimises and maximises desktop windows through `user32` |
 | `send_keys` | Types text or presses a hotkey combination — **destructive**, confirmed |
 | `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
@@ -733,6 +753,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `calendar` | Today's and this week's events from local `.ics` files, recurrence expanded for the common rules |
 | `check_email` | Unread senders and subjects over IMAP. Read-only, headers only, password from the environment |
 | `translate` | Translation through the local model, nothing leaving the machine |
+| `world_time` | The clock elsewhere, and days between dates — the local date and time is in every prompt already — **terminal** |
 | `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
 | `draft_document` | Generates prose with the local model and saves it as a `.docx` |
 | `log_fleet_market_data` | Appends structured rows to a CSV ledger |
@@ -901,7 +922,7 @@ Stated plainly, because they are the honest state of the project:
 - **`calendar` implements a subset of recurrence, not RFC 5545.** `FREQ` of DAILY, WEEKLY, MONTHLY or YEARLY with `INTERVAL`, `UNTIL` and `COUNT`. Monthly and yearly steps are approximated as 30 and 365 days, so a "first Monday of the month" rule or a long monthly series will drift. Anything it cannot expand is reported as possibly missing rather than dropped silently, which makes the gap visible instead of mysterious.
 - **`ocr_screen` needs a Windows OCR language pack** and says so when one is absent. Verified on this machine — 147 lines and 2,479 characters read off a real screen — and Windows-only.
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
-- `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution. Mute is no longer in that category — it goes through CoreAudio, where a target state can be set and then confirmed with `GetMute()` — but its media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it.
+- `media_control`'s media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it. Volume and mute both go through CoreAudio now, where a target state can be set and then read back to confirm it; the keys are used only for a relative step, where there is no target state to get wrong, and for playback, where a toggle is what was asked for. Setting a level used to be 50 `volumedown` keypresses and a step back up on an assumed 2% increment — that is gone.
 - **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
 - **The wake word's audio half has never been tested against a real voice in a real room.** The decision half is: `core/wake_word.py` is covered from both directions, including the mishearings and the "moved to Friday" false trigger, and the socket gate has tests for acting, ignoring and staying silent. What has *not* been measured is whether the energy threshold and the 850 ms silence cut behave on this operator's voice, microphone and room — whether it cuts people off mid-sentence, misses a quiet question, or wakes on a television. Those constants (`SPEECH_MULTIPLIER`, `SILENCE_MS_TO_END` in `desktop/src/hooks/useAlwaysListening.ts`) were reasoned about and not tuned, and tuning them needs a person talking, not a test.
 - **Continuous listening transcribes every utterance in the room, locally.** Nothing leaves the machine and unaddressed speech is discarded rather than stored — but it *is* transcribed before it can be discarded, which costs roughly a quarter of one CPU core while anyone is talking, and means the model sees speech that was not meant for it. A dedicated wake-word model would only process audio after a trigger; that was considered and rejected for this build because openWakeWord ships no pretrained "friday" and training one is its own project.

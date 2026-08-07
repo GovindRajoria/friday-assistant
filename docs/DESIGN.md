@@ -507,6 +507,40 @@ process where `echoCancellation` on the capture stream cannot reach it — so in
 that mode the wake word is also the only thing stopping the assistant from
 hearing itself and replying to it. Relaxing it needs a temporal gate in its place.
 
+**Why the clock is in the prompt and not only a skill.** Nothing in this project
+reported the time until August 2026 — no skill, and no date anywhere in either
+prompt. "What time is it" is close to the most common thing anyone says to an
+assistant, and it scored 0 out of 3 in the routing benchmark. The interesting
+part is that routing was not confused: there was nothing to route to, so the
+model answered from training data, which for a clock means answering wrongly.
+
+Most of the fix is one line in `build_user_message`, because asking a language
+model to invoke a tool to discover what day it is would be a lot of machinery
+for a value the process already holds. But injecting it is not sufficient on its
+own: OPERATING RULE 1 says "You have no knowledge of today... you MUST call a
+tool first", which is exactly correct for news and weather and exactly wrong for
+this. The timestamp needed a matching carve-out in that rule, or the model would
+have kept hunting for a tool while holding the answer.
+
+`world_time` remains, for the two things a static timestamp cannot answer:
+another timezone, and arithmetic between dates. Its offsets are reported in hours
+and minutes rather than decimals — a sixth of the world is not on a whole-hour
+offset, including where this assistant runs, and the 45-minute gap between
+Kolkata and Kathmandu rendered as "0.2 hours ahead" before that was fixed.
+
+**Why `set_volume` was rewritten rather than tuned.** It pressed `volumemute`
+twice "to wake the driver", then `volumedown` fifty times to reach zero, then
+`volumeup` up to fifty times to climb to the requested level, then played a
+1000 Hz beep at the operator. Every part of that is a problem: a hundred
+keystrokes take a visible moment and land on whatever window has focus, and the
+level reached depends on an unverified assumption that the media key steps by 2%.
+`_apply_mute` had already established the CoreAudio path on this machine, and
+`SetMasterVolumeLevelScalar` sets a level exactly, instantly, with no keystrokes.
+Where that interface is unreachable, an absolute level now reports honestly
+instead of approximating one — the same choice the mute path already makes about
+a state it cannot read. The media keys are kept for a *relative* step, where
+there is no target state to get wrong, only a direction.
+
 **Why the follow-up window is timed rather than filtered.** Letting the next
 sentence follow without the name is what makes hands-free feel like a
 conversation instead of a command line, and it is also the change most likely to
@@ -568,11 +602,18 @@ global registration cannot — this window having focus.
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — 523 tests covering graph routing, the
+`pytest` against `FRIDAY_CORE/tests/` — 728 tests covering graph routing, the
 anomaly guard and its privacy switch, the step bound, the confirmation gate, the
-path allowlist, the mute path with the COM layer stubbed, the server, and a
+path allowlist, the volume and mute paths with the COM layer stubbed, the server,
+the speech pipeline and the follow-up window with the engine faked, and a
 regression test for the placeholder-answer failure described above, all run
 against fake skills and a mocked `llm_client.chat`, no model required.
+
+One test reaches outside Python: `test_follow_up_window.py` reads
+`useAlwaysListening.ts` and asserts that the follow-up grace interval still
+exceeds the segmenter's silence window. Those two constants have to hold a
+relationship and live in different languages, and the failure mode if they drift
+is the assistant answering its own voice, so the coupling is worth a file read.
 
 `requirements.txt` is still deliberately not installed in full. It pulls
 `ultralytics`, `torch`, `faster-whisper`, `pyttsx3` and `pynput` — gigabytes of
