@@ -43,6 +43,7 @@ from core.config import SETTINGS
 from core.graph import build_graph
 from core.registry import discover_skills
 from core.session import SPOKEN_EVENT_TYPES, run_turn
+from core.small_talk import is_small_talk
 from core.speech_text import for_speech, resembles, sentences
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -878,8 +879,16 @@ async def _handle_utterance(audio: bytes, ambient: bool = False, captured_at: "f
 
     global _busy
     if _busy:
-        # Single-flight, exactly as a typed prompt is — and said out loud, not
-        # just broadcast: whoever spoke may not be looking at the window.
+        # A pleasantry is dropped without a word. "Thank you" arriving while an
+        # answer is still being spoken is not a request being refused — there is
+        # nothing to come back to later — so announcing it out loud interrupts
+        # the answer to say that nothing was going to happen anyway. Observed on
+        # the second real conversation with it, immediately before the operator
+        # switched listening off.
+        if is_small_talk(spoken):
+            return
+        # Everything else is a real request, and is refused out loud rather than
+        # only in the window: whoever spoke may not be looking at it.
         refusal = "I heard you, but I am still working on the last thing."
         await _broadcast(events.envelope(events.STATUS, {"text": refusal}))
         _say(refusal)

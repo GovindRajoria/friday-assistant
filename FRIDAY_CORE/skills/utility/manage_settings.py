@@ -275,10 +275,19 @@ class ManageSettingsSkill:
 
     @staticmethod
     def _unknown(key):
+        # The nearest match *and* the full list, unlike the spoken skills, which
+        # get the suggestion alone. This message goes back to the model as an
+        # Observation rather than to a person as speech, and a model that is one
+        # character off benefits from the correction while one that guessed
+        # wildly benefits from the menu. Reading fourteen dotted key names aloud
+        # would be the wrong answer; being handed them is not.
+        from core.nearest import did_you_mean
+
         return {
             "status": "error",
-            "message": (f"'{key}' is not a setting I can change. The ones I can: "
-                        + ", ".join(WRITABLE)),
+            "message": (f"'{key}' is not a setting I can change."
+                        + did_you_mean(key, WRITABLE)
+                        + " The ones I can: " + ", ".join(WRITABLE)),
         }
 
 

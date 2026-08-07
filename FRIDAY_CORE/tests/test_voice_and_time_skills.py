@@ -367,3 +367,108 @@ def test_a_place_with_date_now_asks_about_the_place_not_the_date():
     result = WorldTimeSkill().execute({"action": "time_in", "place": "Delhi, India", "date": "now"})
     assert result["status"] == "success"
     assert "Asia/Kolkata" in result["message"]
+
+
+@pytest.mark.parametrize(("misheard", "suggestion"), [
+    ("Tokio", "Tokyo"),
+    ("Londen", "London"),
+    ("Kolkatta", "Kolkata"),
+    ("Sidney", "Sydney"),
+    ("Bangalor", "Bangalore"),
+])
+def test_a_misheard_place_is_offered_back_as_a_question(misheard, suggestion):
+    """Suggested, never substituted.
+
+    Measured against the real timezone database, no similarity threshold
+    separates a mishearing from a fantasy: "dukyo" reaches only 0.60 against
+    "tokyo" while "atlantis" scores 0.88 against "atlantic". Anything that
+    silently corrects the first also answers a question about Narnia with the
+    time in Manila. So the score asks rather than decides.
+    """
+    result = WorldTimeSkill().execute({"action": "time_in", "place": misheard})
+    assert result["status"] == "error"
+    assert f"Did you mean {suggestion}?" in result["message"], result["message"]
+
+
+def test_a_place_that_does_not_exist_is_never_silently_answered():
+    """The reason this suggests instead of correcting. Both of these score higher
+    against a real timezone than "Dukyo" does against Tokyo."""
+    for imaginary in ("Narnia", "Atlantis", "Gotham", "Asgard"):
+        message = WorldTimeSkill().execute({"place": imaginary})["message"]
+        assert "could not find" in message
+        # A suggestion is a question. It must never read as the answer.
+        assert "It is" not in message, f"{imaginary} was answered rather than queried"
+
+
+def test_the_case_this_was_built_for_gets_a_suggestion_even_if_it_is_wrong():
+    """"Dukyo" — the actual mishearing, from the actual conversation.
+
+    It scores 0.60 against "tokyo" and 0.60 against "yukon", an exact tie, so
+    which one is offered is decided by sort order rather than by being right.
+    That is asserted as-is rather than papered over: the honest claim this module
+    makes is that it will offer something plausible, not that it will guess
+    correctly. Two attempts at doing better — consonant skeletons, length
+    preference — were measured and both were worse; core/nearest.py records them.
+    """
+    result = WorldTimeSkill().execute({"place": "Dukyo"})
+    assert result["status"] == "error"
+    # It does say Tokyo — but by sorting, not by knowing: "tokyo" and "yukon" tie
+    # at 0.60 and "t" sorts before "y". Asserted because the behaviour is now
+    # deterministic and should stay so, not because the match is clever.
+    assert "Did you mean Tokyo?" in result["message"], result["message"]
+    # And it is a question, never an answer.
+    assert "It is" not in result["message"]
+
+
+def test_the_failure_message_is_something_a_voice_can_say():
+    """It is a terminal skill, so this message IS the spoken reply. The previous
+    version read "or an IANA name like Asia/Tokyo, will work" out loud."""
+    message = WorldTimeSkill().execute({"place": "Qqqqzzz"})["message"]
+    assert "IANA" not in message
+    assert "could not find a place called Qqqqzzz" in message
+
+
+# ------------------------------------------------ launch_application, the two
+# faults in it: a false success, and no help when the name was misheard.
+
+def test_launching_something_that_does_not_exist_is_not_reported_as_success():
+    """The worst failure class in this project, and it was live in this skill.
+
+    `Popen(..., shell=True)` hands back a live process whether or not the program
+    exists — the shell starts, then discovers there is nothing to run — so every
+    name at all produced "I have launched X for you". The operator then watches
+    the screen for a window that is never going to appear.
+    """
+    from skills.os_control.app_launcher import AppLauncherSkill
+
+    result = AppLauncherSkill().execute({"app_name": "notepadd"})
+    assert result["status"] == "error", result["message"]
+    assert "could not launch" in result["message"]
+
+
+def test_a_misheard_application_name_is_offered_back():
+    from skills.os_control.app_launcher import AppLauncherSkill
+
+    result = AppLauncherSkill().execute({"app_name": "notepadd"})
+    assert "Did you mean notepad?" in result["message"], result["message"]
+
+
+def test_a_real_application_still_launches_and_says_so():
+    # Something present on every Windows install, and harmless: it prints and
+    # exits. On other platforms the skill is not wired up anyway.
+    from skills.os_control.app_launcher import AppLauncherSkill
+
+    if not IS_WINDOWS:
+        pytest.skip("the launcher's success path is Windows-only here")
+    result = AppLauncherSkill().execute({"app_name": "notepad"})
+    assert result["status"] == "success", result["message"]
+
+
+def test_an_unknown_setting_suggests_the_key_that_was_meant():
+    from skills.utility.manage_settings import ManageSettingsSkill
+
+    result = ManageSettingsSkill().execute({"action": "set", "key": "audio.speech_rat", "value": "150"})
+    assert result["status"] == "error"
+    assert "Did you mean audio.speech_rate?" in result["message"], result["message"]
+    # And still the full menu, because this one is read by the model, not spoken.
+    assert "privacy.auto_mute" in result["message"]

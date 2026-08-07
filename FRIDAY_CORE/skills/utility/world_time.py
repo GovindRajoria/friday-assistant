@@ -108,6 +108,21 @@ class WorldTimeSkill:
                 return ZoneInfo(tails[target])
         return None
 
+    def _nearest(self, place):
+        """The closest real place to something that matched nothing, or None.
+
+        A suggestion, never a substitution — `core/nearest.py` carries the
+        measurement behind that, and this skill is where it was measured.
+        """
+        from zoneinfo import available_timezones
+
+        from core.nearest import nearest
+
+        pool = {name.lower().rsplit("/", 1)[-1] for name in available_timezones()}
+        pool.update(ALIASES)
+        match = nearest(str(place or "").strip().strip("?.!"), pool)
+        return match.replace("_", " ").title() if match else None
+
     def _as_date(self, raw):
         """A date from what the model passed, or None.
 
@@ -158,9 +173,17 @@ class WorldTimeSkill:
                     "message": (f"I could not look up timezones ({error}). The timezone database "
                                 "may be missing — 'pip install tzdata' installs it.")}
         if zone is None:
+            # Worded for a speaker, not a terminal. This skill is `terminal`, so
+            # its message IS the reply and gets read out — and the previous
+            # version had the operator listening to "or an IANA name like
+            # Asia/Tokyo, will work", which is documentation, out loud, in answer
+            # to "what time is it in Tokyo".
+            nearest = self._nearest(place)
+            if nearest:
+                return {"status": "error",
+                        "message": f"I could not find a place called {place}. Did you mean {nearest}?"}
             return {"status": "error",
-                    "message": f"I do not know a timezone for '{place}'. A city or country name, "
-                               "or an IANA name like Asia/Tokyo, will work."}
+                    "message": f"I could not find a place called {place}. Try a city or a country."}
 
         there = datetime.now(zone)
         here = datetime.now().astimezone()
