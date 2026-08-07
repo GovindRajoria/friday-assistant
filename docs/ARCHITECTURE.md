@@ -54,6 +54,14 @@ the health probes all hold true answers, and the model's own account of itself
 is a confident guess about assistants in general. Both gates exist because
 asking failed repeatedly and measurably; see the Skills section for the number.
 
+`dispatch` also answers the clock, which is not a question about FRIDAY and is
+here for the same reason. The local date and time is in every prompt and a rule
+says so explicitly, and asked "what's the time" the model stated the correct
+answer in its own reasoning and then called a timezone tool anyway — with a place
+it could not resolve, so the reply was an error about timezone names. A sentence
+with somewhere to look up in it, "what time is it in Tokyo", still goes to the
+model; the patterns are matched against the whole message, so that split is free.
+
 What makes that routing reliable is that the model's reply is structured
 output, not prose. `core/registry.py` derives a JSON Schema from the loaded
 skills — `action` is an enum of real skill names plus the sentinel `"none"` —

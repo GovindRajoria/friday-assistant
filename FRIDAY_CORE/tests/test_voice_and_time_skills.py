@@ -311,3 +311,59 @@ def test_the_rate_can_be_reported_without_changing_it(voice, monkeypatch):
     result = voice.execute({"action": "get_rate"})
     assert "190 words a minute" in result["message"]
     assert voice.written == {}
+
+
+# ---------------------------------------- what the first live use actually did
+
+@pytest.mark.parametrize("place", [
+    # Verbatim from the transcript: the model passed this and got a complaint
+    # about timezone names back, as the answer to "what's the time".
+    "Delhi, India",
+    "delhi india",
+    "New Delhi, India",
+    "Tokyo, Japan",
+    "London, UK",
+    "Paris, France",
+    "the time in Tokyo",
+    "Tokyo?",
+    "Asia/Kolkata",
+    "Kolkata, West Bengal, India",
+])
+def test_a_place_written_the_way_people_write_it_resolves(place):
+    """A place arrives as somebody wrote it, with a country after it and
+    sometimes the punctuation still attached. An exact match against one string
+    is not what that needs."""
+    result = WorldTimeSkill().execute({"action": "time_in", "place": place})
+    assert result["status"] == "success", result["message"]
+
+
+def test_a_country_after_the_city_does_not_change_the_answer():
+    single = WorldTimeSkill().execute({"place": "Tokyo"})["message"]
+    withcountry = WorldTimeSkill().execute({"place": "Tokyo, Japan"})["message"]
+    assert "Asia/Tokyo" in single and "Asia/Tokyo" in withcountry
+
+
+def test_a_genuinely_unknown_place_is_still_refused():
+    # The looser matching must not turn into matching anything: answering about
+    # somewhere else is worse than saying it does not know.
+    assert WorldTimeSkill().execute({"place": "Narnia, Middle Earth"})["status"] == "error"
+    assert WorldTimeSkill().execute({"place": "the moon"})["status"] == "error"
+
+
+@pytest.mark.parametrize("raw", ["now", "today", "currently"])
+def test_now_and_today_are_dates(raw):
+    # The model passes date="now" beside a place. Unparseable, this turned an
+    # answerable question into an error about date formats.
+    assert "today" in WorldTimeSkill().execute({"action": "until", "date": raw})["message"]
+
+
+def test_tomorrow_and_yesterday_are_dates():
+    assert "tomorrow" in WorldTimeSkill().execute({"action": "until", "date": "tomorrow"})["message"]
+    assert "yesterday" in WorldTimeSkill().execute({"action": "until", "date": "yesterday"})["message"]
+
+
+def test_a_place_with_date_now_asks_about_the_place_not_the_date():
+    # The exact parameter pair from the transcript.
+    result = WorldTimeSkill().execute({"action": "time_in", "place": "Delhi, India", "date": "now"})
+    assert result["status"] == "success"
+    assert "Asia/Kolkata" in result["message"]

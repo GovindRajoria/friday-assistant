@@ -59,6 +59,19 @@ LEAD_TRIM = {
 }
 TAIL_TRIM = {"please", "sir", "friday", "then", "actually", "exactly", "thanks"}
 
+# Contractions where the apostrophe replaced an entire word, so the halves must
+# NOT be joined. Applied in order and before the apostrophe is dropped, which is
+# what leaves `'s` — the ambiguous one, "what is" or a possessive — to be joined
+# instead. Both curly and straight forms, because a phone keyboard inserts the
+# first and a terminal the second.
+CONTRACTIONS = [
+    ("n't", " not"), ("n’t", " not"),
+    ("'re", " are"), ("’re", " are"),
+    ("'ve", " have"), ("’ve", " have"),
+    ("'ll", " will"), ("’ll", " will"),
+    ("'m", " am"), ("’m", " am"),
+]
+
 # The architecture document's own section slugs, which is what the skill takes.
 # A topic that is not one of them falls back to the overview inside the skill,
 # so a mapping that guesses slightly wrong still answers approximately.
@@ -72,6 +85,31 @@ OVERVIEW, REASONING, VOICE, VISION, SAFETY, SKILLS = (
 # nine times more common out loud than "enumerate your capabilities", and a
 # pattern set built from careful prose matches nothing anybody says.
 RULES: list[tuple[str, str, dict]] = [
+    # --- the clock. The only class here that is not a question about FRIDAY, and
+    # it earned its place the same way the rest did: by failing in front of the
+    # operator. Asked "what's the time" on 2026-08-07, the model stated the
+    # answer in its own thought — "It's Friday, 7th August 2026, at 03:05 PM
+    # IST", correct, from the timestamp now in every prompt — and then called
+    # `world_time` with place "Delhi, India" anyway. The tool did not recognise
+    # that place, so the reply to "what's the time" was an error message about
+    # timezone names.
+    #
+    # OPERATING RULE 1a had been added that same morning saying, in as many words,
+    # that the clock is the one exception and needs no tool. It was ignored. Which
+    # is the whole doctrine again: the prompt already asks, so asking harder is not
+    # the fix. `world_time` with no parameters reports the local date and time, so
+    # dispatching here is both deterministic and correct — and being terminal, its
+    # answer is the reply, with no second model call to change its mind.
+    #
+    # A place or a date in the sentence is deliberately NOT matched: "what time is
+    # it in Tokyo" and "how long until Christmas" have somewhere to look up and go
+    # to the ordinary loop, where the model fills in the parameter. `fullmatch` is
+    # what makes that split free.
+    (r"(?:what(?:s| is) (?:the )?time|what time is it|do you (?:have|know) the time|"
+     r"(?:tell me )?the time)(?: now| right now| here| currently| please)?", "world_time", {}),
+    (r"(?:what(?:s| is) (?:the |todays )?date|what(?:s| is) today(?:s)? date|what date is it|"
+     r"what day is it|what(?:s| is) the day)(?: today| now| of the week)?", "world_time", {}),
+
     # --- what it just did. Before the identity rules: "what did you do" would
     # otherwise be swallowed by "what do you do".
     (r"what did you (?:just )?do(?: just now| last| there)?", "explain_last_turn", {}),
@@ -89,7 +127,10 @@ RULES: list[tuple[str, str, dict]] = [
     (r"(?:are|is) (?:any of )?your skills? (?:broken|working|ok|okay|failing|loaded)",
      "skill_health", {}),
     (r"(?:did|have) (?:any|all) (?:of )?your skills? (?:fail|failed|load|loaded)", "skill_health", {}),
-    (r"(?:what|anything) (?:is |s )?(?:broken|wrong|failing|not working)", "diagnose_self", {}),
+    # `(?: is|s)?` before the space, not `(?:is |s )?` after it: "what's broken"
+    # now arrives joined as "whats broken", and the old shape required a space
+    # immediately after "what".
+    (r"(?:what|anything)(?: is|s)? (?:broken|wrong|failing|not working)", "diagnose_self", {}),
     (r"is (?:anything|everything) (?:broken|wrong|failing|working|ok|okay)", "diagnose_self", {}),
     (r"(?:run (?:a |the )?)?(?:self.?)?(?:diagnostics?|diagnose yourself|health check)",
      "diagnose_self", {}),
@@ -148,8 +189,23 @@ def strip_address(text: str) -> str:
     Only from the ends, and only whole words. Removing them anywhere would turn
     "what can you tell me about the repo" into something that matches an
     identity pattern, which is the exact failure this module has to avoid.
+
+    Contractions are resolved before normalising, not left to it. `normalise`
+    replaces every non-alphanumeric run with a *space*, so "what's the time"
+    arrives as "what s the time" — a bare "s" between two words every pattern
+    here expects to be adjacent. That had been shipping for a day: "what's your
+    name" matched nothing and went to the model while "whats your name" routed
+    correctly, and the clock rule is what finally exposed it.
+
+    Two kinds, and they need opposite treatment, which is why this is a table and
+    not a `replace("'", "")`. In "who're" the apostrophe stands where a whole word
+    was, so deleting it produces "whore you" and matches nothing; those expand.
+    In "what's" and "today's" it does not, and there the two halves have to join —
+    expanding `'s` to "is" would turn "today's date" into "today is date".
     """
-    words = normalise(text).split()
+    for contraction, expanded in CONTRACTIONS:
+        text = text.replace(contraction, expanded)
+    words = normalise(text.replace("'", "").replace("’", "")).split()
     while words and words[0] in LEAD_TRIM:
         words.pop(0)
     while words and words[-1] in TAIL_TRIM:

@@ -197,6 +197,9 @@ DISPATCH_THOUGHTS = {
     "explain_last_turn": "Let me look at what I actually did.",
     "diagnose_self": "Let me run through my own state and see.",
     "skill_health": "Let me check which of my skills actually loaded.",
+    # Short on purpose: the answer is one sentence and it arrives immediately, so
+    # anything longer is spoken narration in front of a fact.
+    "world_time": "Let me check.",
 }
 
 

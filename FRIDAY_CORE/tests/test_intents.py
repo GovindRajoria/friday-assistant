@@ -222,3 +222,77 @@ def test_the_broad_identity_rules_do_not_shadow_the_narrow_ones():
     """
     assert intents.route("what did you just do")[0] == "explain_last_turn"
     assert intents.route("what do you do")[0] == "core_identity"
+
+
+@pytest.mark.parametrize("said", [
+    # Verbatim from the first live use, which is why this rule exists.
+    "what's the time",
+    "whats the time",
+    "what is the time",
+    "what time is it",
+    "friday what time is it",
+    "hey friday, what's the time?",
+    "do you have the time",
+    "the time please",
+    "what is the date",
+    "what's today's date",
+    "what date is it",
+    "what day is it",
+    "what day is it today",
+    "what is the day today",
+])
+def test_the_clock_is_answered_without_asking_the_model(said):
+    """Asked "what's the time" on 2026-08-07, the model stated the correct answer
+    in its own thought — from the timestamp now in every prompt — and then called
+    `world_time` with place "Delhi, India" regardless, so the reply the operator
+    got was an error about timezone names. OPERATING RULE 1a had been written that
+    morning to prevent exactly that, and was ignored.
+
+    `world_time` with no parameters reports the local date and time, so
+    dispatching here is deterministic and right.
+    """
+    routed = intents.route(said)
+    assert routed is not None, f"{said!r} fell through to the model"
+    assert routed == ("world_time", {})
+
+
+@pytest.mark.parametrize("said", [
+    # A place or a date means there IS something to look up, and the model has to
+    # fill the parameter in. These must reach the ordinary loop.
+    "what time is it in tokyo",
+    "what is the time in london",
+    "what day is it in japan",
+    "how many days until christmas",
+    "what date is the meeting",
+    "what time is the meeting",
+    "what time does the shop open",
+    "what is the date of the release",
+    "tell me the time in new york",
+    # Not about the clock at all.
+    "what is the time complexity of this function",
+    "how long did that take",
+    "set a reminder for 5pm",
+])
+def test_a_clock_question_with_somewhere_to_look_still_reaches_the_model(said):
+    assert intents.route(said) is None, f"{said!r} was wrongly claimed by the intent router"
+
+
+@pytest.mark.parametrize(("said", "expected"), [
+    # `normalise` turns an apostrophe into a space, so these arrived as
+    # "what s your name" — a bare "s" between two words every pattern expects to
+    # be adjacent. Every contraction silently missed for a day because of it, and
+    # the clock rule is what finally exposed it.
+    ("what's your name", "core_identity"),
+    ("what's your purpose", "core_identity"),
+    ("who're you", "core_identity"),
+    ("what's the time", "world_time"),
+    ("what's today's date", "world_time"),
+    ("what's broken", "diagnose_self"),
+    # The typographic apostrophe a phone or a word processor inserts.
+    ("what\u2019s the time", "world_time"),
+    ("what\u2019s your name", "core_identity"),
+])
+def test_a_contraction_routes_the_same_as_its_expansion(said, expected):
+    routed = intents.route(said)
+    assert routed is not None, f"{said!r} fell through to the model"
+    assert routed[0] == expected

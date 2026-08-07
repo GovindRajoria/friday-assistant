@@ -18,7 +18,8 @@ requirements.txt for exactly this). Imported lazily so that a host without it
 still loads the skill and reports the reason, rather than vanishing from the
 registry at import time.
 """
-from datetime import date, datetime
+import re
+from datetime import date, datetime, timedelta
 
 # Places whose IANA name cannot be guessed from what people call them. Everything
 # else is matched against the real timezone database rather than a table here,
@@ -67,19 +68,44 @@ class WorldTimeSkill:
         every name in that set already ends in the city it belongs to, so
         "tokyo" finds "Asia/Tokyo" and "sao paulo" finds "America/Sao_Paulo"
         without anyone maintaining a list of the world's cities here.
+
+        **Several candidates are tried, not one.** The first live use of this
+        skill was asked for the time and the model passed place="Delhi, India" —
+        a perfectly ordinary way to name a place, and an exact match for nothing
+        at all, so the answer to "what's the time" was a complaint about timezone
+        names. A place arrives as the model or the operator writes it: with a
+        country after it, with "city of" in front, occasionally with the question
+        mark still attached. Splitting on the punctuation and trying each part
+        costs one loop and removes a whole class of that.
         """
         from zoneinfo import ZoneInfo, available_timezones
 
-        wanted = str(place or "").strip().lower()
+        wanted = str(place or "").strip().lower().strip("?.!")
         if not wanted:
             return None
-        if wanted in ALIASES:
-            return ZoneInfo(ALIASES[wanted])
 
-        target = wanted.replace(" ", "_").replace("-", "_")
-        for name in available_timezones():
-            if name.lower() == target or name.lower().rsplit("/", 1)[-1] == target:
-                return ZoneInfo(name)
+        # Whole string first, so "New York" is not answered by "York" and an
+        # explicit "Asia/Kolkata" never gets taken apart.
+        candidates = [wanted]
+        candidates += [part.strip() for part in re.split(r"[,/;]| in | near ", wanted) if part.strip()]
+        # Last resort, single words: "the time in delhi india please" survives this.
+        candidates += wanted.replace(",", " ").split()
+
+        zones = {name.lower(): name for name in available_timezones()}
+        tails = {}
+        for lowered, name in zones.items():
+            # First one wins, so "Asia/Kolkata" is not shadowed by a later
+            # deprecated alias pointing at the same place.
+            tails.setdefault(lowered.rsplit("/", 1)[-1], name)
+
+        for candidate in candidates:
+            if candidate in ALIASES:
+                return ZoneInfo(ALIASES[candidate])
+            target = candidate.replace(" ", "_").replace("-", "_")
+            if target in zones:
+                return ZoneInfo(zones[target])
+            if target in tails:
+                return ZoneInfo(tails[target])
         return None
 
     def _as_date(self, raw):
@@ -93,6 +119,16 @@ class WorldTimeSkill:
         if not text:
             return None
         today = date.today()
+
+        # The model passes date="now" alongside a place, and date="today" when it
+        # means today. Both were unparseable, which turned an answerable question
+        # into an error about date formats.
+        if text in ("now", "today", "currently", "right now", "this day"):
+            return today
+        if text == "tomorrow":
+            return today + timedelta(days=1)
+        if text == "yesterday":
+            return today - timedelta(days=1)
 
         if text in NAMED_DATES:
             month, day = NAMED_DATES[text]
