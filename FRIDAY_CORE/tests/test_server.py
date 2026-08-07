@@ -565,9 +565,13 @@ class _FakeSpeech:
 
     def __init__(self):
         self.said = []
+        self.silenced = 0
 
     def speak(self, text):
         self.said.append(text)
+
+    def silence(self):
+        self.silenced += 1
 
 
 def test_a_spoken_request_refused_while_busy_says_so_out_loud(monkeypatch, no_loaded_model):
@@ -812,3 +816,74 @@ def test_a_failed_ambient_transcription_is_silent(monkeypatch, no_loaded_model):
         event = ws.receive_json()
 
     assert "Continuous listening off" in event["payload"]["text"]
+
+
+def test_saying_stop_cuts_the_speech_and_runs_nothing(monkeypatch, no_loaded_model):
+    """"Stop" has to get through while busy, which is the one case it is for.
+
+    It is therefore handled before both gates that stand in front of everything
+    else: before the wake word, because somebody interrupting will not stop to
+    say the name, and before the single-flight check, because a request that is
+    only honoured when nothing is running is not an interruption at all.
+    """
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("stop"))
+    speech = _FakeSpeech()
+    monkeypatch.setattr(server_app, "_speech", speech)
+    turns = []
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: turns.append(a) or _decision())
+
+    server_app._busy = True
+    try:
+        with TestClient(app).websocket_connect("/ws") as ws:
+            ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+            ws.receive_json()
+            ws.send_bytes(b"audio")
+            event = ws.receive_json()
+    finally:
+        server_app._busy = False
+
+    assert event["type"] == "status"
+    assert event["payload"]["text"] == "Stopped."
+    assert speech.silenced == 1
+    # The turn in flight is told to end, and no new one starts.
+    assert server_app.interrupter.interrupted is True
+    assert turns == []
+    # Answering "be quiet" out loud would be a joke at the operator's expense.
+    assert speech.said == []
+
+
+def test_stop_is_not_broadcast_as_something_it_was_heard_to_ask_for(monkeypatch, no_loaded_model):
+    # No `transcript` event: there is no request to record, and showing "stop" as
+    # a prompt in the log would read as a turn that produced nothing.
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("friday be quiet"))
+    monkeypatch.setattr(server_app, "_speech", _FakeSpeech())
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")
+        event = ws.receive_json()
+
+    assert event["type"] == "status"
+
+
+def test_a_request_that_merely_starts_with_stop_still_runs(monkeypatch, no_loaded_model):
+    """The expensive direction. "Stop the build" is a request, and one that
+    reaches a skill; swallowing it as "be quiet" looks like being ignored."""
+    monkeypatch.setattr(server_app, "_build_transcriber",
+                        lambda: _FakeTranscriber("friday stop the build"))
+    speech = _FakeSpeech()
+    monkeypatch.setattr(server_app, "_speech", speech)
+    asked = []
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: asked.append(a) or _decision(final_answer="stopped it"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        ws.receive_json()
+        ws.send_bytes(b"audio")
+        assert ws.receive_json() == {"type": "transcript", "payload": {"text": "stop the build"}}
+        deadline = time.time() + 5
+        while not asked and time.time() < deadline:
+            time.sleep(0.02)
+
+    assert asked, "a real request was swallowed as a command to be quiet"
+    assert speech.silenced == 0

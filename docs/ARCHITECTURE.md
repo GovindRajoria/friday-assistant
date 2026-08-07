@@ -194,6 +194,32 @@ thread for the life of the process, because the Windows speech API is COM and
 thread-affine: an engine built on one thread and driven from another
 deadlocks rather than failing.
 
+That affinity has a consequence beyond startup. Nothing outside that thread may
+call into the engine, so `stop()` is unavailable and an utterance already playing
+cannot be cut off. What can be controlled is the queue — so an answer is enqueued
+one sentence at a time, and interrupting means emptying the queue. The worst case
+is that the sentence in progress finishes, about a second.
+
+An answer is rewritten before it is spoken (`core/speech_text.py`). The model
+writes markdown whether or not it was asked to, and a voice pronounces it:
+`**ready**` becomes "star star ready star star", and a URL becomes half a minute
+of "h t t p colon slash slash". Markers are removed and the words between them
+kept; a fenced code block is the one thing described rather than read, because
+twenty lines of Python read aloud is noise with a shape. The rewrite happens on
+the way to the speaker only — the HUD still shows the answer as written.
+
+The speech thread also publishes whether it is talking and when it last stopped.
+That is not instrumentation: the voice plays out of process, so the microphone
+hears it and the capture stream's echo cancellation does not, and anything
+deciding whether to listen has to know when the audio actually ended. A
+`runAndWait()` that has returned is the only trustworthy signal for that here.
+
+Saying "stop", "be quiet" or "never mind" empties the queue and ends the running
+turn without starting a new one. It is matched against the whole utterance and
+never as a prefix, which is what keeps "stop the build" a request rather than an
+instruction to shut up — and, incidentally, what stops the assistant silencing
+itself when it says "I have stopped the service" and hears it.
+
 ## Vision
 
 Two separate paths, deliberately unlike each other.

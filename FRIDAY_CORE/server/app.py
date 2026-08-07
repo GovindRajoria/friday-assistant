@@ -35,12 +35,14 @@ import queue
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, time
+from time import monotonic
 
 import uvicorn
 from core.config import SETTINGS
 from core.graph import build_graph
 from core.registry import discover_skills
 from core.session import SPOKEN_EVENT_TYPES, run_turn
+from core.speech_text import for_speech, sentences
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from server import events
@@ -124,10 +126,35 @@ class _SpeechThread:
     dedicated thread with its own queue keeps the engine's home thread fixed
     no matter which pool thread the graph itself runs on for a given turn;
     callers just enqueue text.
+
+    **One sentence per queue item, not one answer.** That thread affinity also
+    means `engine.stop()` can never be called from anywhere else, so an utterance
+    already being spoken cannot be cut short — the only lever anyone else has is
+    what is still waiting in the queue. Enqueueing per sentence turns that lever
+    into a real interruption, about a second's worth of latency, with no
+    cross-thread call into COM at all. `silence()` is that lever.
+
+    It also publishes when it stopped talking, which is not a convenience: the
+    platform voice plays out of process, so the HUD's microphone hears it and the
+    audio stream's echo cancellation cannot. Anything that decides whether to
+    listen has to know when playback actually ended, and `runAndWait()` returning
+    is the only trustworthy signal for that on this platform.
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings, speaker_factory=None):
+        # `speaker_factory` exists so the queue, the flag and the clock can be
+        # tested without a COM apartment or an audio device — everything above
+        # is ordinary Python, and it was previously untestable only because the
+        # engine was constructed by name inside the thread. Called ON the speech
+        # thread, not here, because whatever it builds is thread-affine.
+        self._speaker_factory = speaker_factory
         self._queue: "queue.Queue[str | None]" = queue.Queue()
+        # Written on the speech thread, read from the event loop. A plain bool is
+        # enough: assignment is atomic under the GIL, both readers only ever ask
+        # "is it talking right now", and a caller that reads it one sentence out
+        # of date is answered again 20 ms later.
+        self._speaking = False
+        self._idle_since = monotonic()
         self._thread = threading.Thread(target=self._run, args=(settings,), daemon=True)
         self._thread.start()
 
@@ -149,21 +176,74 @@ class _SpeechThread:
             # module-level import would still have made the whole test file
             # uncollectable. Same reason core/llm_client.py imports ollama
             # inside get_client().
-            from core.speaker import FridaySpeaker
+            if self._speaker_factory is not None:
+                speaker = self._speaker_factory()
+            else:
+                from core.speaker import FridaySpeaker
 
-            speaker = FridaySpeaker(settings=settings)
+                speaker = FridaySpeaker(settings=settings)
             while True:
                 text = self._queue.get()
                 if text is None:
                     return
-                speaker.speak(text)
+                self._speaking = True
+                try:
+                    speaker.speak(text)
+                finally:
+                    # Order matters: the flag comes down first, then the clock is
+                    # set, and only when nothing else is waiting. Setting the
+                    # clock after each sentence of a five-sentence answer would
+                    # report "quiet since a moment ago" four times in the middle
+                    # of continuous speech.
+                    self._speaking = False
+                    if self._queue.empty():
+                        self._idle_since = monotonic()
         finally:
             if platform.system() == "Windows":
                 import comtypes
                 comtypes.CoUninitialize()
 
+    @property
+    def speaking(self) -> bool:
+        """Is audio playing, or about to be without another call from anyone?
+
+        The queue counts. A caller asking this to decide whether to listen wants
+        "will sound come out of the speakers in the next moment", and a queue with
+        four sentences left in it answers yes.
+        """
+        return self._speaking or not self._queue.empty()
+
+    @property
+    def quiet_since(self) -> "float | None":
+        """monotonic() when playback last finished, or None while it is talking.
+
+        Monotonic rather than wall clock because this is only ever used to measure
+        an elapsed interval, and a clock that a timezone change or an NTP step can
+        move backwards would open a listening window at the wrong moment.
+        """
+        return None if self.speaking else self._idle_since
+
     def speak(self, text: str) -> None:
-        self._queue.put(text)
+        """Queue one answer, as the sentences it will actually be said in."""
+        for sentence in sentences(for_speech(text)):
+            self._queue.put(sentence)
+
+    def silence(self) -> None:
+        """Stop talking after the current sentence.
+
+        Everything still queued is dropped. What is already playing is not — see
+        the class docstring: there is no safe way to interrupt it from here.
+
+        A `None` sitting in the queue would be discarded along with the text,
+        which would strand the thread. In practice nothing calls this after
+        stop(): stop() runs once, from the lifespan handler, as the process is
+        going down.
+        """
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
 
     def stop(self) -> None:
         self._queue.put(None)
@@ -659,10 +739,24 @@ async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
             await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
         return
 
-    if ambient:
-        from core.wake_word import find
+    from core.wake_word import find, is_stop_command
 
-        addressed, command = find(text, SETTINGS["assistant"].get("wake_word", "friday"))
+    wake_word = SETTINGS["assistant"].get("wake_word", "friday")
+    if is_stop_command(text, wake_word):
+        # Cut the speech, end whatever is running, and run nothing. Handled
+        # before the wake-word gate because somebody interrupting will not say
+        # the name first, and before the busy check because "stop" is precisely
+        # the thing that must still get through while busy.
+        if _speech is not None:
+            _speech.silence()
+        interrupter.cancel()
+        # Broadcast only. Answering "be quiet" out loud would be a joke at the
+        # operator's expense.
+        await _broadcast(events.envelope(events.STATUS, {"text": "Stopped."}))
+        return
+
+    if ambient:
+        addressed, command = find(text, wake_word)
         if not addressed:
             return                  # room noise; nothing said, nothing kept
         # The name alone is a request for attention. Handed on as "yes?", which

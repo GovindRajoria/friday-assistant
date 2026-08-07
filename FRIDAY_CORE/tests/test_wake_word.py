@@ -9,7 +9,7 @@ what `small.en` actually does with a name: it splits it, or renders it as a
 different word entirely.
 """
 import pytest
-from core.wake_word import find
+from core.wake_word import find, is_stop_command
 
 
 @pytest.mark.parametrize("heard, expected_command", [
@@ -134,3 +134,59 @@ def test_thursday_is_never_treated_as_the_wake_word(heard):
     addressed, _ = find(heard)
 
     assert addressed is False
+
+
+@pytest.mark.parametrize("heard", [
+    "stop",
+    "Stop.",
+    "friday stop",
+    "hey friday, stop",
+    "stop talking",
+    "be quiet",
+    "quiet please",
+    "shut up",
+    "never mind",
+    "that is enough",
+    "cancel that",
+])
+def test_asking_it_to_be_quiet_is_recognised_without_the_name(heard):
+    """Requiring the name from somebody interrupting would be the worst possible
+    moment to insist on protocol — they are already talking over an answer."""
+    assert is_stop_command(heard) is True
+
+
+@pytest.mark.parametrize("heard", [
+    # The expensive half. Every one of these is a real request, and three of them
+    # reach a destructive skill — swallowing them as "be quiet" would look like
+    # the assistant ignoring an instruction it had actually heard perfectly.
+    "stop the build",
+    "stop the container",
+    "cancel the deployment",
+    "cancel my meeting at four",
+    "stop the music",
+    "quiet the notifications",
+    "never mind the weather, read the news",
+    "forget it and open notepad",
+    # Its own speech, arriving back through an open microphone. This is the case
+    # the whole-utterance match exists for.
+    "I have stopped the service.",
+    "Stopped the build, as you asked.",
+    "That is enough disk space for now.",
+])
+def test_a_real_request_is_never_swallowed_as_a_command_to_be_quiet(heard):
+    assert is_stop_command(heard) is False
+
+
+def test_the_name_alone_is_not_a_command_to_be_quiet():
+    # It is a request for attention, answered with "yes?" — and after the name is
+    # stripped nothing is left, which must not fall through to a match on "".
+    assert is_stop_command("friday") is False
+    assert is_stop_command("") is False
+    assert is_stop_command("   ") is False
+
+
+def test_a_configured_name_is_stripped_and_the_default_is_not():
+    assert is_stop_command("computer stop", wake_word="computer") is True
+    # "friday stop" under a renamed assistant is two words that are not a stop
+    # phrase, exactly as `find` refuses to inherit the default's variants.
+    assert is_stop_command("friday stop", wake_word="computer") is False
