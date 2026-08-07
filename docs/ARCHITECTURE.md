@@ -183,6 +183,34 @@ the answer plays out of a speaker, and the platform voice plays out of process
 where the audio stream's echo cancellation cannot reach it — so the wake word is
 also the only thing stopping this assistant from hearing itself and replying.
 
+Once it has answered a spoken question it will hear the next sentence without
+being named again, for eight seconds. That window is the one part of the voice
+work where the obvious implementation is a runaway loop — answer, window opens,
+the tail of its own speech is recorded, no name needed, a turn runs, a new
+answer — so the gate is temporal and it is the mechanism rather than a backstop.
+
+Two details make it hold. The window is measured from **when playback finished**,
+not from when the turn ended: the answer is handed to a queue and the turn returns
+immediately, so the speakers are often still going seconds later. And it is
+measured against **when the audio was recorded**, not when it arrived. That
+distinction is the whole argument: transcription takes one to two seconds, so an
+echo evaluated on arrival has already aged past any plausible grace interval and
+would be admitted. The recording time is stamped the instant the audio lands,
+which is within milliseconds of the segment being cut.
+
+The grace interval before the window opens is arithmetic rather than taste. A
+segment that captured the tail of playback is not cut until the segmenter's
+silence window has passed, so it *ends* after the audio did; the grace has to
+exceed that or every answer's own tail lands inside the window. A test asserts
+that relationship against the TypeScript constant, because the two numbers live
+in different languages in different directories.
+
+A text-similarity check on what was last said aloud sits behind all of that, and
+only covers what the timing cannot: the operator talking over the answer, so one
+segment holds both voices. It is deliberately the weaker half — there is no
+threshold that separates "an echo of my answer" from "the operator repeating my
+words back to me", which people do constantly.
+
 One control in the window covers both. It shows whether the microphone is open,
 whether something is being picked up, and whether a turn is running, because a
 switch that silently means "the microphone is live" is the wrong switch for

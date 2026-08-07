@@ -204,7 +204,26 @@ wanted before they had said anything, which is a question about this program's
 internals dressed up as a question about their intent. Push-to-talk kept the
 hotkey and lost its button.
 
-Three things make it work rather than merely function:
+**Reply to an answer and it hears you without the name.** For eight seconds after
+it finishes speaking, the next thing you say is treated as part of the same
+conversation — *"what's the weather"* / *"warm and dry"* / *"and tomorrow?"*.
+
+That window is the one place in the voice work where the obvious implementation
+is a runaway loop: it answers, the window opens, the microphone records the tail
+of its own speech, no name is required, a turn runs, and it answers again. The
+platform voice plays out of process, so the HUD's echo cancellation never sees it.
+
+So the window is gated on time, not on content, and on two specific times.
+It runs from when **playback finished** rather than when the turn ended, because
+the answer goes to a queue and the turn returns while the speakers are still
+going. And it is measured against when the audio was **recorded**, not when it
+arrived: transcription takes a second or two, so an echo judged on arrival has
+already aged past any grace interval you would pick. The delay before the window
+opens has to exceed the segmenter's silence window, or the tail of every answer
+lands inside it — a test asserts that against the TypeScript constant, since the
+two numbers are in different files in different languages.
+
+Four things make it work rather than merely function:
 
 **The recorder runs continuously and is cut during silence**, not started when
 speech is detected. Detection takes about 150 milliseconds, and starting a
@@ -227,6 +246,11 @@ trigger runs a turn on a conversation with somebody else in the room.
 Anything not addressed to it is **discarded** — not run, not shown, not stored.
 A continuous microphone that echoed the room into the HUD would be a transcript
 of the room.
+
+Say **"stop"**, **"be quiet"** or **"never mind"** and it stops talking and ends
+the turn without starting a new one. That is matched against the whole sentence
+and never as a prefix, so *"stop the build"* is still a request — and, usefully,
+so is its own *"I have stopped the service"* if it hears itself say it.
 
 In this mode the review step above is replaced by the wake word itself, which is
 a deliberate trade: hands-free is the whole point, and saying the assistant's

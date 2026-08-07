@@ -507,6 +507,46 @@ process where `echoCancellation` on the capture stream cannot reach it — so in
 that mode the wake word is also the only thing stopping the assistant from
 hearing itself and replying to it. Relaxing it needs a temporal gate in its place.
 
+**Why the follow-up window is timed rather than filtered.** Letting the next
+sentence follow without the name is what makes hands-free feel like a
+conversation instead of a command line, and it is also the change most likely to
+produce a machine that talks to itself forever. The naive version removes the
+only protection against that at precisely the moment audio is playing.
+
+The first design that suggests itself is a text filter: drop anything that looks
+like what was just said. It cannot be the primary gate. There is no threshold
+separating "an echo of my answer" from "the operator repeating my words back at
+me" — which people do constantly, because replying with the words you just heard
+is how conversation works. Measured at 0.75 similarity, *"what is the weather in
+Bhopal"* scores as an echo of *"the weather in Bhopal is warm"*. So the gate is
+temporal and the filter sits behind it, covering only the case the timing cannot:
+the operator talking over the answer, so one recorded segment holds both voices.
+
+Two things about the timing were wrong in the first plan for it, and both matter:
+
+- **It must run from playback finishing, not from the turn ending.** The answer
+  is handed to a queue and `_run_prompt` returns immediately, so the speakers are
+  frequently still going seconds after the turn is over. `runAndWait()` having
+  returned is the only trustworthy signal on this platform, which is why the
+  speech thread publishes it.
+- **It must be measured against when the audio was recorded, not when it
+  arrived.** This is the one that would have shipped broken. Transcription takes
+  one to two seconds, so by the time an utterance is evaluated, an echo has
+  already aged past any grace interval anyone would pick — the gate would admit
+  exactly what it was written to exclude. The recording time is stamped the
+  moment the binary frame lands, which is within milliseconds of the segment
+  being cut, and that only holds because the HUD ships a segment straight out of
+  `recorder.onstop` with nothing slow in between. Adding an `await` to that path
+  would reopen the hole silently, so it is named in the docstring.
+
+The grace interval before the window opens is arithmetic, not preference: a
+segment that recorded the tail of playback is not cut until `SILENCE_MS_TO_END`
+of silence has passed, so it ends *after* the audio did. The grace must exceed
+that. Those two constants are in different languages in different directories,
+and raising `SILENCE_MS_TO_END` to stop cutting people off at commas is a
+plausible future change that would quietly reopen the loop — so a test reads the
+TypeScript and asserts the relationship.
+
 **Why one control replaced two.** The command bar had **Speak** and **Wake
 word** side by side, and the operator's complaint about the arrangement was the
 arrangement. Two controls for one capability make somebody decide which kind of

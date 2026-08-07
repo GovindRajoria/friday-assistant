@@ -163,6 +163,50 @@ def _split_line(line: str) -> list[str]:
     return pieces
 
 
+_NON_WORD = re.compile(r"[^a-z0-9]+")
+# Below this, an utterance is too short to judge. "yes", "no", "stop" and "the
+# blue one" are all things somebody says inside a follow-up window, and all of
+# them appear inside almost any answer this assistant gives — matching on them
+# would make the filter eat exactly the replies the window exists to accept.
+_MIN_WORDS_TO_JUDGE = 4
+# Near-verbatim, not merely similar. An echo is the same words through a speaker
+# and a microphone, so what survives a Whisper pass is very close to the original.
+# 0.75 was too low to be safe: "what is the weather in bhopal" scores about that
+# against "the weather in bhopal is warm", which is a real question being asked
+# again rather than an echo, and a filter that eats a repeated question is worse
+# than one that occasionally lets an echo through — the temporal gate is what
+# actually stops echo, and this is only its second line.
+_ECHO_RATIO = 0.85
+
+
+def normalise(text: str) -> str:
+    """Letters, digits and single spaces. For comparing two transcriptions."""
+    return _NON_WORD.sub(" ", (text or "").lower()).strip()
+
+
+def resembles(heard: str, said: str) -> bool:
+    """Is `heard` plausibly this assistant's own `said` coming back in?
+
+    Deliberately the weaker half of a pair. The gate that actually prevents the
+    assistant hearing itself is temporal — a segment recorded while audio was
+    playing is not eligible to be a follow-up at all — and this exists for the
+    one case that gate cannot cover: the operator talking over the answer, so a
+    single segment holds both voices. Text matching alone would be a bad gate,
+    because there is no threshold that separates "an echo of my answer" from
+    "the operator repeating my words back at me", which people do constantly.
+    """
+    import difflib
+
+    left, right = normalise(heard), normalise(said)
+    if not left or not right:
+        return False
+    if len(left.split()) < _MIN_WORDS_TO_JUDGE:
+        return False
+    if left in right:
+        return True
+    return difflib.SequenceMatcher(None, left, right).ratio() >= _ECHO_RATIO
+
+
 def _ends_on_an_abbreviation(candidate: str) -> bool:
     if not candidate.endswith("."):
         return False

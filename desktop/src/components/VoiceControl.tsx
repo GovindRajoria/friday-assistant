@@ -15,7 +15,8 @@ const LABELS: Record<VoiceStatus, { text: string; title: string }> = {
   starting: { text: "Opening…", title: "Waiting for the microphone" },
   waiting: {
     text: "Listening",
-    title: "The microphone is open. Say 'Friday' and then what you want. Click to stop listening.",
+    title: "The microphone is open. Say 'Friday' and then what you want — and reply to an "
+      + "answer straight away and it will hear you without the name. Click to stop listening.",
   },
   hearing: { text: "Hearing you…", title: "Picking up speech now. Click to stop listening." },
   recording: { text: "Recording…", title: "Recording one request (Ctrl+Shift+Space to stop)" },
