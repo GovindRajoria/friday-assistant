@@ -553,6 +553,14 @@ word "machine" and `manage_memory` none of "remember", so the only words anybody
 says when asking for them appeared nowhere in the text being ranked. Adding a word
 the skill genuinely is about is not the same as a skill claiming ground next to it.
 
+**What it changed about the remaining errors, which matters more than the score.** All three
+regressions were diagnosed, and in every one the correct skill was offered and the model chose
+something else — `task_list` ranked first by more than double the next score and was still declined
+in favour of "none". So what is left is not a retrieval problem but a selection problem among about
+ten candidates. That is worth stating precisely because it changes what to try next: description
+steering between competing pairs was measured as useless at forty-seven skills, where it moved the
+attractor rather than removing it, but the reason it failed there does not apply to a field of ten.
+
 **What this does not fix.** The shortlist is computed from the operator's words
 alone, so a chain whose second step needs a tool the original sentence did not
 imply can find it missing. No case in the labelled set does that, and the cheap
