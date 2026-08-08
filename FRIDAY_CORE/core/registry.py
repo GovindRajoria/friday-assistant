@@ -117,13 +117,57 @@ def build_action_schema(active_skills: dict) -> dict:
     a thought and no action at all — it narrated a plan and selected nothing.
     Requiring the field is what forces a commitment; `"none"` is how the model
     declines rather than by omission.
+
+    A REJECTED FIX, RECORDED SO IT IS NOT TRIED AGAIN. `tools/routing_bench.py`
+    showed the model answering correctly in its `thought` and then choosing a
+    tool anyway: asked "how many bytes in a gigabyte" it thought *"A gigabyte is
+    1,073,741,824 bytes"* and set `action` to `web_search`; asked what GPU stands
+    for it answered "Graphics Processing Unit" and chose `translate`. 0/5 on the
+    cases needing no tool.
+
+    The obvious fix is to make the model commit to *whether* a tool is needed
+    before choosing *which*, in a field of its own — structured output is
+    generated in schema order, so a field placed before `action` is decided
+    before it. Three variants were measured against the full case set:
+
+      * `needs_tool: "yes"|"no"` after `thought` — fixed the arithmetic cases,
+        then returned "no" for "restart the machine", "delete the temp folder"
+        and "remind me to call the site". Reasonable, in fact: nothing needs
+        looking up in order to restart a machine. The field had conflated needing
+        to *read* something with needing to *do* something.
+      * `intent: "do"|"look_up"|"answer"` after `thought`, naming that third
+        case — returned "answer" for nearly everything, including "take a
+        screenshot" and "what is the weather like", while the `action` field
+        beside it named the right tool. Overall 56.2% -> 39.7%.
+      * The same field moved *before* `thought`, testing whether the model was
+        merely staying consistent with a narrative it had already begun — same
+        result: "answer" for weather and screenshot.
+
+    The reason is visible in the raw replies. The model writes the whole object
+    as a script of a finished interaction — for `screenshot` it filled
+    `final_answer` with "The screenshot has been saved to /tmp/screenshot.png"
+    before anything ran, and for `weather` it wrote a forecast with
+    `{temperature}` left as a literal placeholder. In that frame "answer" is not
+    a classification of the request, it is a description of the story it is
+    telling. Asking it to classify its own turn does not work, wherever the
+    question is placed.
+
+    What did work for the class of question where the model is confidently wrong
+    was to stop asking it: see core/intents.py. What is still unfixed is the
+    no-tool case, and it is honest to say so — the arithmetic and definition
+    cases below still spend a wasted tool call before `conclude` answers from
+    what it already knew.
     """
     return {
         "type": "object",
         "properties": {
             "thought": {
                 "type": "string",
-                "description": "Spoken aloud before acting. Always required.",
+                "description": (
+                    "Your plan, spoken aloud before anything runs. One or two sentences saying what "
+                    "you are about to do and why — never the answer itself, and never a result you "
+                    "have not seen yet."
+                ),
             },
             "action": {"type": "string", "enum": [*sorted(active_skills), NO_ACTION]},
             "action_input": {"type": "object"},

@@ -20,7 +20,7 @@ installed on; no audio, camera frame, or transcript is sent to any cloud
 service, and there is no API key anywhere in the project.
 
 There are two processes. The backend is Python: a LangGraph state machine
-driving a local Llama 3.1 through Ollama, with eighteen skills discovered off
+driving a local Llama 3.1 through Ollama, with forty-eight skills discovered off
 the filesystem at startup. The front end is an Electron window that talks to
 that backend over a WebSocket on 127.0.0.1, showing every step of the
 reasoning as it happens rather than only the final answer. The same backend
@@ -38,12 +38,29 @@ supplies the part that is genuinely hard to hand-roll: an explicit graph of
 nodes with conditional edges between them, one typed state object threaded
 through all of them, and a stream of state updates as each node finishes.
 
-There are six nodes. `reason` asks the model what to do next. `confirm` stops
+There are ten nodes. `reason` asks the model what to do next. `confirm` stops
 and asks a human before anything destructive. `act` executes the chosen skill.
 `anomaly_guard` applies the privacy rule after a camera scan. `nudge` handles
-a reply that chose neither a tool nor an answer, and `abort` ends a chain that
-has run too long. Routing between them is plain Python reading fields off the
-state.
+a reply that chose neither a tool nor an answer, `abort` ends a chain that has
+run too long, `finish` ends one where the skill's own output was the answer,
+and `conclude` makes it answer from what it has when the tool budget runs out.
+Routing between them is plain Python reading fields off the state.
+
+Two nodes are reached before the model is consulted at all. `converse` answers
+conversation — a greeting goes there and cannot call a tool, because the tool
+is not offered. `dispatch` answers questions about FRIDAY itself by choosing
+the skill in Python: the registry, the architecture document, the turn log and
+the health probes all hold true answers, and the model's own account of itself
+is a confident guess about assistants in general. Both gates exist because
+asking failed repeatedly and measurably; see the Skills section for the number.
+
+`dispatch` also answers the clock, which is not a question about FRIDAY and is
+here for the same reason. The local date and time is in every prompt and a rule
+says so explicitly, and asked "what's the time" the model stated the correct
+answer in its own reasoning and then called a timezone tool anyway — with a place
+it could not resolve, so the reply was an error about timezone names. A sentence
+with somewhere to look up in it, "what time is it in Tokyo", still goes to the
+model; the patterns are matched against the whole message, so that split is free.
 
 What makes that routing reliable is that the model's reply is structured
 output, not prose. `core/registry.py` derives a JSON Schema from the loaded
@@ -52,6 +69,15 @@ and Ollama constrains generation to it. So a tool call cannot be lost to
 rewording, and a tool that does not exist cannot be named. Before this, the
 loop matched an `Action:` line out of free text, and a stray markdown bullet
 was enough to drop the call.
+
+The list of skills in that schema is not the whole registry. `core/shortlist.py`
+scores the loaded skills against the request and offers about ten of them, in
+both the prompt and the enum — forty-seven descriptions is eight thousand tokens
+and the model was demonstrably not reading them. The subset is derived from the
+question rather than carried in the state, so it is identical on every step of a
+chain; an enum that gained or lost members halfway through would let the model
+name a tool on one step that it could not name on the next. The Skills section
+below has the measurement.
 
 The schema keeps a required `thought` field, which is the reason for choosing
 it over the model's native function-calling. Native tool calls give a function
@@ -81,9 +107,9 @@ data or a device. The `skill_health` skill reads that record back, so a skill
 that vanished can say why instead of simply not being there.
 
 `skills.disabled` in the settings leaves a named skill unloaded. It is an
-escape hatch rather than a feature: there are forty-six skills and no measured
-tool-selection accuracy for any of them, so a group that turns out to confuse
-routing has to be switchable off without editing code.
+escape hatch rather than a feature: there are forty-eight skills, and at that
+count a group that turns out to confuse routing has to be switchable off
+without editing code.
 
 The manifests are what the model routes on, so they are validated in CI by
 `tools/check_manifests.py`: names unique, parameters a list of strings, flags
@@ -93,6 +119,83 @@ descriptions are *distinguishable*, which is the failure that matters at this
 count — nothing breaks, and the model reaches for the wrong tool. Competing
 pairs therefore name each other explicitly, and `tests/test_skill_routing_surface.py`
 pins those disambiguations so a later edit cannot quietly drop one.
+
+How often it picks the right one is now measured rather than assumed.
+`tools/routing_bench.py` scores a labelled set of seventy-eight spoken requests
+against the live registry, and the first run answered a question this project
+had avoided for a long time: **56%**. A deterministic route for self-knowledge
+questions took it to **62%**, the voice work of 2026-08-07 to **70.5%**, and the
+per-turn shortlist described below to **84.6%**. Every figure quoted here is
+like-for-like — scored only on the cases both runs could reach, which is what says
+whether routing moved rather than whether the answer key became answerable.
+
+Three changes account for that, and none of them was a better prompt. Two skills
+that did not exist were built, so five cases stopped being unanswerable. The local
+date and time went into the prompt, which fixed the clock. And two descriptions
+were rewritten on the strength of the measurement: `media_control`'s was one line
+with none of the words anybody uses — loud, quiet, sound, speakers — while
+`manage_settings` advertised "whether you mute audio... how fast you speak" and
+took all three volume cases as a result. A description competes on its words, not
+on what the skill is for.
+
+That last change also demonstrated the cost of the approach. Strengthening
+`media_control` did not just win its own cases: it began winning "minimise this
+window", "kill the chrome process" and "type this into the document" from its
+terser neighbours in the same family. The obvious repair — a clause naming
+exactly those four things as not its business — was measured and changed nothing
+at all: 70.5% before and after, with two cases moving off `media_control` and two
+others moving on to a different wrong tool. It was removed rather than kept,
+because it spends tokens in every prompt to relabel which answer is wrong.
+
+Rewriting a description therefore moves the attractor rather than removing it,
+which pointed at the same conclusion the misses already suggested: the problem is
+attention across forty-seven descriptions, not missing information in any one of
+them.
+
+**That turned out to be right, and acting on it took routing from 70.5% to
+84.6%** — the largest single move this project has measured, and the figure is
+like-for-like, the same cases both runs could reach. `core/shortlist.py` scores
+the loaded skills against the request and puts roughly ten of them in the system
+prompt and in the enum instead of all forty-seven. Nothing about the descriptions
+changed. The model was reading a list too long to read, and every one of the
+long-standing misses went away at once: "kill the chrome process", "lock the
+screen", "restart the machine", "open notepad", "minimise this window", "is my
+code committed", "find where set_volume is defined". So did the arithmetic case
+that had resisted three schema changes — asked how many bytes are in a gigabyte
+it now answers without reaching for a tool at all.
+
+The scoring is lexical, weighted by inverse document frequency across the
+manifests themselves, which is what makes it work: "use" and "this" appear in
+every description and count for nothing, while "clipboard" and "commit" appear in
+one and count for a great deal. It is lexical rather than semantic because there
+is no embedding model installed here, and pulling one to rank forty-seven short
+documents would be a large dependency for a small job.
+
+**The failure it must not have is omitting the right tool**, because the enum is
+built from the same subset — a skill that is not in the list cannot be named,
+however obvious the request. Two rules guard that. If nothing scores above a
+floor, the whole registry is returned, since a ranking built on noise is worse
+than no ranking. And the size was measured rather than chosen: every case in the
+labelled set keeps its correct answer inside a list of eight, so ten ships, and
+`tests/test_shortlist.py` fails if that stops being true. That test needs no
+model, so unlike the benchmark it runs in CI.
+
+**And it is not overfitting, which is the obvious objection.** By this point the
+seventy-eight labelled cases had been tuned against four separate times, so a
+rising number had stopped being evidence on its own. Eighteen held-out requests
+were written afterwards in one sitting, worded to avoid the vocabulary the
+manifests use — "what's eating all my disk" rather than "how much disk space is
+free", "pop open the calculator" rather than "open the calculator" — which is the
+hard case for lexical shortlisting by construction. They score **83.3%** against
+84.6% on the tuned set, every one of them decided by the model rather than by a
+fast path. `tools/routing_holdout.yaml` says in its own header that nothing may
+ever be tuned against it, because the moment something is, it becomes a second
+training set and can no longer answer the only question it exists for.
+
+Two descriptions were rewritten on the strength of that recall test rather than
+the other way round. `system_check` did not contain the word "machine" and
+`manage_memory` did not contain "remember" — the only words anybody actually says
+when asking for them appeared nowhere in the text being ranked.
 
 Skills cover reading files on the disk (documents, spreadsheets, text off the
 screen by OCR), the web (search, news, weather, page reading, opening a link),
@@ -121,14 +224,22 @@ accented speech.
 
 There are two ways in. The console entry point captures the microphone itself
 and listens for a wake word. The desktop window records with the browser's
-MediaRecorder when the Speak button or the global hotkey is pressed, and
-sends the encoded audio down the WebSocket it already has open; the Python
+MediaRecorder, either continuously or for one utterance on the global hotkey,
+and sends the encoded audio down the WebSocket it already has open; the Python
 side transcribes it with the same model. The browser's own SpeechRecognition
 API is deliberately not used — on Chromium it uploads audio to Google.
 
-What comes back is put in the prompt box and left there. It is not run.
-Recognition being good is why a mishearing is rare; the review step is why it
-does not matter when it happens, given the skills a request can reach.
+**What comes back is run.** Until August 2026 it was put in the prompt box and
+left there for the operator to read and send, and that review step was a real
+safety layer: a mishearing could not become a request until a human had looked
+at it. It was removed because it also meant speaking to this assistant was
+slower than typing to it, which is most of the reason to speak at all.
+
+Three things stand where it stood. Every destructive skill still stops at the
+confirmation gate before it runs, so the worst a mishearing reaches unaided is
+read-only. `Stop` is live for the length of a turn. And the transcript event
+still arrives first and is still logged, so what it heard is on screen beside
+what it did about it.
 
 The desktop window can also hold the microphone open and act only when addressed
 by name — the wake word mode, off by default. The recorder runs continuously and
@@ -145,14 +256,80 @@ mistakes cost different amounts: a missed wake word costs one repetition, a fals
 trigger runs a turn on a conversation nobody addressed here. Unaddressed speech is
 discarded rather than shown or stored.
 
-In that mode the wake word replaces the prompt-box review, which is a trade rather
-than a relaxation — saying the name is an explicit act of address, and the
-confirmation gate still stands in front of everything destructive.
+The name is required in that mode and not in the other, which is not an
+inconsistency: a press is itself an act of address, and a microphone that has
+been open for an hour has nothing else to distinguish a request from the room.
+It also matters that the two modes differ in what they can hear. Push-to-talk
+releases the microphone before the recording is even sent, so it cannot capture
+the answer to its own question. The continuous mode's microphone is open while
+the answer plays out of a speaker, and the platform voice plays out of process
+where the audio stream's echo cancellation cannot reach it — so the wake word is
+also the only thing stopping this assistant from hearing itself and replying.
+
+Once it has answered a spoken question it will hear the next sentence without
+being named again, for eight seconds. That window is the one part of the voice
+work where the obvious implementation is a runaway loop — answer, window opens,
+the tail of its own speech is recorded, no name needed, a turn runs, a new
+answer — so the gate is temporal and it is the mechanism rather than a backstop.
+
+Two details make it hold. The window is measured from **when playback finished**,
+not from when the turn ended: the answer is handed to a queue and the turn returns
+immediately, so the speakers are often still going seconds later. And it is
+measured against **when the audio was recorded**, not when it arrived. That
+distinction is the whole argument: transcription takes one to two seconds, so an
+echo evaluated on arrival has already aged past any plausible grace interval and
+would be admitted. The recording time is stamped the instant the audio lands,
+which is within milliseconds of the segment being cut.
+
+The grace interval before the window opens is arithmetic rather than taste. A
+segment that captured the tail of playback is not cut until the segmenter's
+silence window has passed, so it *ends* after the audio did; the grace has to
+exceed that or every answer's own tail lands inside the window. A test asserts
+that relationship against the TypeScript constant, because the two numbers live
+in different languages in different directories.
+
+A text-similarity check on what was last said aloud sits behind all of that, and
+only covers what the timing cannot: the operator talking over the answer, so one
+segment holds both voices. It is deliberately the weaker half — there is no
+threshold that separates "an echo of my answer" from "the operator repeating my
+words back to me", which people do constantly.
+
+One control in the window covers both. It shows whether the microphone is open,
+whether something is being picked up, and whether a turn is running, because a
+switch that silently means "the microphone is live" is the wrong switch for
+this. The state it was left in is remembered across a restart; absent, it is
+off, so a fresh install never opens the microphone on its own.
 
 Speech output is pyttsx3 over the platform voice. It runs on one dedicated
 thread for the life of the process, because the Windows speech API is COM and
 thread-affine: an engine built on one thread and driven from another
 deadlocks rather than failing.
+
+That affinity has a consequence beyond startup. Nothing outside that thread may
+call into the engine, so `stop()` is unavailable and an utterance already playing
+cannot be cut off. What can be controlled is the queue — so an answer is enqueued
+one sentence at a time, and interrupting means emptying the queue. The worst case
+is that the sentence in progress finishes, about a second.
+
+An answer is rewritten before it is spoken (`core/speech_text.py`). The model
+writes markdown whether or not it was asked to, and a voice pronounces it:
+`**ready**` becomes "star star ready star star", and a URL becomes half a minute
+of "h t t p colon slash slash". Markers are removed and the words between them
+kept; a fenced code block is the one thing described rather than read, because
+twenty lines of Python read aloud is noise with a shape. The rewrite happens on
+the way to the speaker only — the HUD still shows the answer as written.
+
+The speech thread also publishes whether it is talking and when it last stopped.
+That is not instrumentation: the voice plays out of process, so the microphone
+hears it and the capture stream's echo cancellation does not, and anything
+deciding whether to listen has to know when the audio actually ended. A
+`runAndWait()` that has returned is the only trustworthy signal for that here.
+
+Saying "stop", "be quiet" or "never mind" empties the queue and ends the running
+turn without starting a new one. It is matched against the whole utterance and
+never as a prefix, which is what keeps "stop the build" a request rather than an
+instruction to shut up — and, incidentally, what stops the assistant silencing
+itself when it says "I have stopped the service" and hears it.
 
 ## Vision
 

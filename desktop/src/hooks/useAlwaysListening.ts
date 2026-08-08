@@ -35,7 +35,21 @@ const FRAME_MS = 50;
 const SILENCE_MS_TO_END = 850;
 // Speech must last at least this long to count, which discards a cough, a door,
 // and a single keyboard clack.
-const MIN_SPEECH_MS = 250;
+//
+// 250ms until the follow-up window existed, which measured well against doors
+// and badly against people: "stop", "yes" and "no" are around a quarter of a
+// second each, and the counter resets on any frame that dips below the
+// threshold, so a word that quiet in the middle was dropped entirely. Those
+// three words are exactly what someone says when they are being asked a
+// question or interrupting an answer, which made the failure land in the two
+// moments it was least affordable.
+//
+// The cost of the lower bound is a wasted transcription of a cough, and it is
+// cheap in a way worth stating: Whisper's own VAD is a second filter, an
+// utterance with no speech in it comes back as "" and ambient mode drops that
+// silently. So a false segment costs a fraction of a second of CPU and produces
+// nothing — where a missed word costs the operator a repetition.
+const MIN_SPEECH_MS = 150;
 // A segment is cut at this length whatever is happening, so one long monologue
 // cannot grow an unbounded blob in memory.
 const MAX_SEGMENT_MS = 20_000;

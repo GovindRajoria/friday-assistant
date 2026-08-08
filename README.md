@@ -24,9 +24,8 @@ Built May 2026.
 ```mermaid
 flowchart LR
   mic(["microphone<br/>console"]) --> stt["faster-whisper<br/>wake word + STT"]
-  hud(["microphone<br/>HUD — Speak button"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
+  hud(["microphone<br/>HUD — Ctrl+Shift+Space"]) --> rec["MediaRecorder<br/>WebM/Opus over /ws"]
   rec --> stt2["faster-whisper<br/>same model, no wake word"]
-  stt2 --> box["prompt box<br/>operator reads it and sends"]
   wake(["microphone<br/>HUD — always listening"]) --> seg["continuous record,<br/>cut on silence"]
   seg --> stt3["faster-whisper"]
   stt3 --> gate{"core/wake_word.py<br/>addressed by name?"}
@@ -34,13 +33,14 @@ flowchart LR
   kbd(["keypress"]) --> typed["typed input"]
 
   stt --> entry
-  box --> entry
+  stt2 -->|"the press is the address"| entry
   typed --> entry
   gate -->|"yes — name stripped"| entry
 
   subgraph graph["core/graph.py — LangGraph state machine"]
-    entry{"small_talk?"}
+    entry{"small_talk?<br/>a known intent?"}
     converse["converse<br/>no schema, no tools"]
+    dispatch["dispatch<br/>core/intents.py — routed<br/>without asking the model"]
     reason["reason<br/>structured output → thought/action"]
     confirm["confirm<br/>human sign-off; denies by default"]
     act["act<br/>skill.execute(params)"]
@@ -50,7 +50,9 @@ flowchart LR
     abort["abort<br/>steps past max_react_steps"]
 
     entry -->|"just conversation"| converse
-    entry -->|"a real request"| reason
+    entry -->|"a question about itself"| dispatch
+    entry -->|"anything else"| reason
+    dispatch -->|"same gates as a chosen action"| act
     reason -->|"action set, under step bound"| act
     reason -->|"action is destructive"| confirm
     confirm -->|"approved"| act
@@ -131,6 +133,39 @@ cd FRIDAY_CORE && python tools/check_manifests.py
 
 It reads the manifests with `ast` rather than importing them, so it needs none of the runtime dependencies and works on a machine with no model, no microphone and no camera.
 
+### Ten skills in the prompt, not forty-seven
+
+Discovering forty-eight skills is easy. Getting the model to pick the right one
+is the hard part, and it was measured at **56%** before anything was done about
+it. Four attempts to fix that by giving the model *more* information all failed —
+one of them, a schema field asking whether a tool was needed at all, took routing
+down to **39.7%**.
+
+The clue was in the misses and it was easy to misread. Several skills that *lost*
+a routing decision already carried a description naming the skill that should have
+won: `system_check` says "gpu_status for accelerators" and still beat `gpu_status`
+on "is the GPU being used". The information was present, correctly worded, in the
+prompt, and not read. Forty-seven descriptions is about eight thousand tokens.
+
+`core/shortlist.py` scores the loaded skills against the request and puts roughly
+ten of them in the system prompt and in the enum. **70.5% → 84.6%**, with no
+description changed, and every long-standing miss cleared at once.
+
+The scoring is lexical, weighted by inverse document frequency across the
+manifests themselves — which is what makes a lexical approach work here. "Use" and
+"this" appear in every description and price at zero; "clipboard" appears in one
+and prices high. It is not semantic because there is no embedding model installed,
+and adding one to rank forty-seven short documents would be a large dependency for
+a small job.
+
+**The failure it must not have is omitting the right tool**, because the enum is
+built from the same subset — a skill that is not offered cannot be named, however
+obvious the request. Two rules guard it: below a floor score the whole registry is
+returned, since a ranking built on noise is worse than no ranking; and the list
+size was measured rather than chosen, with a test asserting that every labelled
+case keeps its answer inside the list. That test needs no model, so unlike the
+benchmark it runs in CI.
+
 ### Interrupts
 
 `core/interrupt_handler.py` runs a global `pynput` keyboard listener. Pressing **Delete** mid-thought sets a flag the graph driver checks on every streamed update, so a reasoning chain that has gone off the rails can be killed without terminating the process.
@@ -171,27 +206,57 @@ binary, so the frame needs no envelope of its own.
 Two ways in, one recogniser.
 
 The console entry point opens the microphone itself and waits for the wake
-word. The desktop window records with the browser's `MediaRecorder` when the
-**Speak** button or **Ctrl+Shift+Space** is pressed, and sends the WebM/Opus
-blob down the WebSocket it already has open; `core/transcriber.py` decodes and
-transcribes it with the same faster-whisper model the console uses.
-Chromium's own `SpeechRecognition` API is deliberately not used — it uploads
-audio to Google, which would quietly end the local-first claim.
+word. The desktop window records with the browser's `MediaRecorder` when
+**Ctrl+Shift+Space** is pressed, and sends the WebM/Opus blob down the
+WebSocket it already has open; `core/transcriber.py` decodes and transcribes it
+with the same faster-whisper model the console uses. Chromium's own
+`SpeechRecognition` API is deliberately not used — it uploads audio to Google,
+which would quietly end the local-first claim.
 
-**What comes back is put in the prompt box and left there.** It is not run. A
-mishearing that goes straight into the graph is a mishearing that can reach a
-skill which deletes files; recognition being good is why that is rare, and the
-review step is why it does not matter when it happens. Correct the word, press
-Enter.
+**What comes back is run.** Speaking is asking; there is nothing to press
+afterwards. Until August 2026 the text landed in the prompt box and waited for a
+click, which was a real review step — a mishearing could not become a request
+until a human had read it — and it also meant talking to this assistant was
+slower than typing to it.
 
-#### Or don't press anything: the wake word
+What stands in its place: every destructive skill still stops at the
+confirmation gate, so the worst a mishearing reaches unaided is read-only;
+**Stop** is live for the length of a turn; and what it heard is printed in the
+transcript directly above what it did about it.
 
-The **Wake word** toggle beside the Speak button holds the microphone open and
-acts when you address it by name — *"Friday, what's the weather"*. It is off by
-default and it is a per-session choice, because a microphone that stays open is
-not something to inherit from a default.
+#### Or leave it listening: the wake word
 
-Three things make it work rather than merely function:
+The one **Voice** control on the command bar holds the microphone open and acts
+when you address it by name — *"Friday, what's the weather"*. It is off on a
+fresh install, because a microphone that stays open is not something to inherit
+from a default; once you turn it on, it is remembered across restarts.
+
+There used to be two buttons here, **Speak** and **Wake word**. One control
+replaced them because two made the operator choose which kind of microphone they
+wanted before they had said anything, which is a question about this program's
+internals dressed up as a question about their intent. Push-to-talk kept the
+hotkey and lost its button.
+
+**Reply to an answer and it hears you without the name.** For eight seconds after
+it finishes speaking, the next thing you say is treated as part of the same
+conversation — *"what's the weather"* / *"warm and dry"* / *"and tomorrow?"*.
+
+That window is the one place in the voice work where the obvious implementation
+is a runaway loop: it answers, the window opens, the microphone records the tail
+of its own speech, no name is required, a turn runs, and it answers again. The
+platform voice plays out of process, so the HUD's echo cancellation never sees it.
+
+So the window is gated on time, not on content, and on two specific times.
+It runs from when **playback finished** rather than when the turn ended, because
+the answer goes to a queue and the turn returns while the speakers are still
+going. And it is measured against when the audio was **recorded**, not when it
+arrived: transcription takes a second or two, so an echo judged on arrival has
+already aged past any grace interval you would pick. The delay before the window
+opens has to exceed the segmenter's silence window, or the tail of every answer
+lands inside it — a test asserts that against the TypeScript constant, since the
+two numbers are in different files in different languages.
+
+Four things make it work rather than merely function:
 
 **The recorder runs continuously and is cut during silence**, not started when
 speech is detected. Detection takes about 150 milliseconds, and starting a
@@ -214,6 +279,30 @@ trigger runs a turn on a conversation with somebody else in the room.
 Anything not addressed to it is **discarded** — not run, not shown, not stored.
 A continuous microphone that echoed the room into the HUD would be a transcript
 of the room.
+
+Say **"stop"**, **"be quiet"** or **"never mind"** and it stops talking and ends
+the turn without starting a new one. That is matched against the whole sentence
+and never as a prefix, so *"stop the build"* is still a request — and, usefully,
+so is its own *"I have stopped the service"* if it hears itself say it.
+
+#### How it sounds
+
+The answer is rewritten before it is spoken. The model writes markdown whether or
+not it was asked to, and a voice pronounces it: `**Ready.**` used to come out as
+"star star ready star star", and a URL as half a minute of "h t t p colon slash
+slash". `core/speech_text.py` takes the markers off and keeps the words, collapses
+a link to "a link", and describes a fenced code block instead of reading twenty
+lines of Python aloud. The HUD still shows the answer as written.
+
+It is also queued one sentence at a time rather than one answer at a time, which
+is what makes interrupting it work at all: the speech engine is COM and
+thread-affine, so `stop()` cannot be called from anywhere but its own thread, and
+emptying a queue is the only lever available. The cost of an interruption is the
+sentence already in flight.
+
+Say **"speak more slowly"** or **"you're too fast"** and it changes rate on the
+next sentence — `core/speaker.py` re-reads the setting before every utterance, so
+the confirmation is spoken at the new speed rather than merely claimed.
 
 In this mode the review step above is replaced by the wake word itself, which is
 a deliberate trade: hands-free is the whole point, and saying the assistant's
@@ -615,7 +704,7 @@ def setup():
 
 ## Included skills
 
-Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below.
+Forty-eight on disk, forty-seven loaded — `track_price` ships disabled, see below.
 **`destructive`** marks a skill that routes through the confirmation gate;
 **`terminal`** marks one whose output is the whole answer, ending the turn.
 
@@ -670,6 +759,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `skill_health` | Which skills failed to load and why, separating a missing package from missing data — **terminal** |
 | `diagnose_self` | The ten things that have actually gone wrong here, checked in one question — **terminal** |
 | `manage_settings` | Reads and changes its own settings in conversation, from a key allowlist — **destructive**, confirmed |
+| `voice_control` | How it speaks: faster, slower, a rate in words per minute, aloud or not, which voices are installed — **terminal** |
 
 ### The machine
 
@@ -681,7 +771,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `manage_processes` | Lists processes, or ends one by name — refuses its own tree and critical system processes. **destructive**, confirmed |
 | `power_control` | Lock, sleep, restart, shut down — the last two delayed and abortable. **destructive**, confirmed |
 | `launch_application` | Opens desktop applications, with per-OS executable name mapping |
-| `media_control` | System volume and playback control (Windows) |
+| `media_control` | System volume and playback: sets a level exactly through CoreAudio, steps up and down, mutes, pauses, skips (Windows) |
 | `window_control` | Lists, focuses, minimises and maximises desktop windows through `user32` |
 | `send_keys` | Types text or presses a hotkey combination — **destructive**, confirmed |
 | `manage_files` | Lists, reads, moves and deletes inside an allowlisted workspace — **destructive**, confirmed |
@@ -696,6 +786,7 @@ Forty-six on disk, forty-five loaded — `track_price` ships disabled, see below
 | `calendar` | Today's and this week's events from local `.ics` files, recurrence expanded for the common rules |
 | `check_email` | Unread senders and subjects over IMAP. Read-only, headers only, password from the environment |
 | `translate` | Translation through the local model, nothing leaving the machine |
+| `world_time` | The clock elsewhere, and days between dates — the local date and time is in every prompt already — **terminal** |
 | `manage_memory` | Stores and retrieves facts in a local SQLite vault, synthesising a natural reply on retrieval |
 | `draft_document` | Generates prose with the local model and saves it as a `.docx` |
 | `log_fleet_market_data` | Appends structured rows to a CSV ledger |
@@ -858,17 +949,17 @@ the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 
 Stated plainly, because they are the honest state of the project:
 
-- **The skill count went from 19 to 46 in one batch, and per-skill routing accuracy is unmeasured.** This is the largest unverified claim in the project. Every skill has been exercised directly and the descriptions were audited pair by pair for the overlaps that compete — `read_document` against `manage_files`, `ocr_screen` against `describe_screen`, `run_command` against `run_tests` — with `tests/test_skill_routing_surface.py` pinning those disambiguations. None of that is a measurement. Whether the model picks correctly among 45 tools more or less often than among 19 is not known, and the honest answer to "did adding these make it better" is that nobody has scored it. `skills.disabled` in `settings.yaml` exists for exactly this: a group that turns out to confuse routing is a config edit, not a revert.
+- **Tool selection is measured at 84.6%, which means roughly one request in six still reaches for the wrong tool.** That number comes from `tools/routing_bench.py` against seventy-eight labelled spoken requests, and it is the honest figure rather than a flattering one: it is scored like-for-like across runs, and it counts a case as wrong even where the chosen tool is defensible. It has moved 56% -> 62% -> 70.5% -> 84.6% as the causes were found, and it is not an artefact of tuning against the answer key: eighteen held-out requests written after all of those changes, phrased away from the manifests' own vocabulary, score 83.3%. and the largest single gain came from showing the model ten scored skills per request instead of all forty-seven — the information had been present and unread. What remains is mostly genuine ambiguity between neighbours (`search_files` against `search_code`, `send_keys` against `draft_document`) plus a mild tendency to answer "none" where a tool would have served. The benchmark needs Ollama and about three minutes, so it is not a CI gate; the shortlist's recall test is, because it needs no model. `skills.disabled` in `settings.yaml` remains the escape hatch if a group of skills turns out to confuse routing.
 - **Several new skills are unverified against the thing they talk to.** `check_email` has never run against a live IMAP server — there is no mail account on the development machine, so its parsing and every error path are tested and the conversation with a real server is not. `calendar` is tested against `.ics` files this project generated, not against a real export from Outlook or Google. `track_price` ships disabled for the same class of reason: it works when called, and it has not run on a schedule over the weeks that would justify trusting it to.
 - **The ripgrep path in `search_files` and `search_code` is unexercised here.** `shutil.which("rg")` returns None on this machine, so the bounded Python scan is what actually runs. The ripgrep branch is written and unit-tested against its exit codes, and has never spoken to a real ripgrep.
 - **`calendar` implements a subset of recurrence, not RFC 5545.** `FREQ` of DAILY, WEEKLY, MONTHLY or YEARLY with `INTERVAL`, `UNTIL` and `COUNT`. Monthly and yearly steps are approximated as 30 and 365 days, so a "first Monday of the month" rule or a long monthly series will drift. Anything it cannot expand is reported as possibly missing rather than dropped silently, which makes the gap visible instead of mysterious.
 - **`ocr_screen` needs a Windows OCR language pack** and says so when one is absent. Verified on this machine — 147 lines and 2,479 characters read off a real screen — and Windows-only.
 - The anomaly guard is coupled to one skill by name. `route_after_act` in `core/graph.py` only routes to `anomaly_guard` when `action == "scan_environment"`; a second skill producing detections worth guarding on would need that check extended by hand.
-- `media_control` sets volume by simulating 50 `volumedown` keypresses and stepping back up, because it assumes Windows' fixed 2% increments. It works, but it is a workaround for driver-state issues rather than a clean solution. Mute is no longer in that category — it goes through CoreAudio, where a target state can be set and then confirmed with `GetMute()` — but its media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it.
+- `media_control`'s media-key fallback is only exercised by unit tests with the COM layer stubbed, never on hardware, because the machine it was written on does not need it. Volume and mute both go through CoreAudio now, where a target state can be set and then read back to confirm it; the keys are used only for a relative step, where there is no target state to get wrong, and for playback, where a toggle is what was asked for. Setting a level used to be 50 `volumedown` keypresses and a step back up on an assumed 2% increment — that is gone.
 - **Speech recognition is a latency compromise and the accuracy half is unmeasured on real voices.** `small.en` on CPU at `int8` was chosen because every larger model measured at or past realtime on this machine, which push-to-talk cannot absorb. The comparison that picked it used synthesised speech, so it establishes the timings and nothing about word error on an accented voice in a room — run `benchmarks/stt_models.py --record` to settle that for yourself, and raise `audio.stt_model` if you would rather wait.
-- **The wake word's audio half has never been tested against a real voice in a real room.** The decision half is: `core/wake_word.py` is covered from both directions, including the mishearings and the "moved to Friday" false trigger, and the socket gate has tests for acting, ignoring and staying silent. What has *not* been measured is whether the energy threshold and the 850 ms silence cut behave on this operator's voice, microphone and room — whether it cuts people off mid-sentence, misses a quiet question, or wakes on a television. Those constants (`SPEECH_MULTIPLIER`, `SILENCE_MS_TO_END` in `desktop/src/hooks/useAlwaysListening.ts`) were reasoned about and not tuned, and tuning them needs a person talking, not a test.
+- **The wake word's audio half has never been tested against a real voice in a real room.** The decision half is: `core/wake_word.py` is covered from both directions, including the mishearings and the "moved to Friday" false trigger, and the socket gate has tests for acting, ignoring and staying silent. What has *not* been measured is whether the energy threshold and the 850 ms silence cut behave on this operator's voice, microphone and room — whether it cuts people off mid-sentence, misses a quiet question, or wakes on a television. Those constants (`SPEECH_MULTIPLIER`, `SILENCE_MS_TO_END` and `MIN_SPEECH_MS` in `desktop/src/hooks/useAlwaysListening.ts`, and the follow-up window's eight seconds and 1.2s grace in `server/app.py`) were reasoned about and not tuned — `MIN_SPEECH_MS` moved from 250 to 150 on an argument about how long the word "stop" takes, not on a measurement — and tuning them needs a person talking, not a test.
 - **Continuous listening transcribes every utterance in the room, locally.** Nothing leaves the machine and unaddressed speech is discarded rather than stored — but it *is* transcribed before it can be discarded, which costs roughly a quarter of one CPU core while anyone is talking, and means the model sees speech that was not meant for it. A dedicated wake-word model would only process audio after a trigger; that was considered and rejected for this build because openWakeWord ships no pretrained "friday" and training one is its own project.
-- **The voice path is verified in two halves that have not yet been joined end to end.** The server half: a real WebM/Opus blob sent over the socket to a live backend came back correctly transcribed in 3.6s, and started no turn. The renderer half: pressing the control really does open the microphone and put the HUD into its recording state, observed in the live DOM — and the control is present and enabled in the *packaged* build too, confirmed the same way, since a Chromium window on this platform does not screenshot faithfully. What has not been measured is a spoken sentence going in one end and the right words coming out the other — and none of the renderer audio code (`getUserMedia`, `MediaRecorder`, the permission prompt, the global hotkey) has any automated coverage. Talking to it is the only check that counts.
+- **The voice path has never been verified end to end by a person speaking to it.** The two halves have been checked separately, in the packaged build, through DevTools against the live DOM — a Chromium window on this platform does not screenshot faithfully, so an image of it is not evidence. The server half: a real WebM/Opus blob sent over the socket came back correctly transcribed in 3.6s. The renderer half, re-observed on 2026-08-07 after the control was rewritten: the packaged app shows exactly one voice control and neither of the two it replaced; clicking it really does open the microphone and move to `Listening`; the choice is written to `localStorage`; and after a relaunch it comes back up listening from that preference alone. What is still unmeasured is the join: a spoken sentence going in one end and the right words coming out the other. None of the renderer audio code (`getUserMedia`, `MediaRecorder`, the permission prompt, the hotkey) has automated coverage, and neither the follow-up window nor the stop words have been heard working — their tests drive a fake speaker and a synthetic clock. Talking to it is the only check that counts.
 - **Web lookup depends on third-party endpoints that can close without warning.** `web_search` originally scraped DuckDuckGo's HTML; on 2026-08-03 both the lite and html endpoints began answering 202 with zero results, and every web question failed as "I couldn't find any results" — indistinguishable from an empty search. It now uses documented APIs and falls through three sources rather than one, which makes a single outage survivable, not impossible. `read_news` is localised to India/English in `LOCALE`; change those two values for another region.
 - **The model will claim to have done things it has not done.** Caught live: asked to set a reminder, it replied "Reminder set" without calling the skill, and nothing was stored — the worst available failure for a feature whose value is that you stop holding the thing in your head. The system prompt now states that "done", "saved" and "reminder set" are true only when a tool just said so in an Observation. That is an instruction, not a guarantee.
 - **The model will still answer a current-events question from memory if allowed to.** Caught live: asked to summarise today's news, it made no tool call and invented plausible headlines. The system prompt now carries an explicit rule that anything time-sensitive must come from a tool result, and the graph refuses to re-run a tool call identical to the one it just made — but both are instructions and a guard, not a guarantee that a local model never confabulates.

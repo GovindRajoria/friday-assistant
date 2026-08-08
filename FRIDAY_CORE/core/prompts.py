@@ -23,6 +23,7 @@ and every request ran to the step bound. The TERMINATION rule below names the
 is not discoverable from the enum alone.
 """
 import json
+from datetime import datetime
 
 from core.config import SETTINGS
 
@@ -49,6 +50,19 @@ def build_user_message(user_prompt: str, memory_buffer: str = "", screen_context
     if profile.get("interests"):
         lines.append(f"Interests: {profile['interests']}")
     lines.append("Tone: Sophisticated, sharp, and witty.")
+
+    # The clock. Absent until 2026-08-07, and its absence was doing more damage
+    # than it looks: OPERATING RULE 1 tells the model it has no knowledge of
+    # today, so "what time is it" and "what day is it" — the most ordinary things
+    # anyone asks an assistant — went hunting for a tool that did not exist, and
+    # then answered from training data. A timestamp the process already has, and
+    # a matching carve-out in that rule, is the whole fix.
+    #
+    # Here rather than in the system prompt because it changes every turn, and
+    # the system prompt is the part worth keeping identical across turns.
+    now = datetime.now().astimezone()
+    lines.append(f"Current date and time: {now:%A} {now.day} {now:%B %Y, %I:%M %p}"
+                 f" ({now.strftime('%Z') or 'local time'})")
 
     message = (
         "User Profile:\n" + "\n".join(lines)
@@ -100,6 +114,7 @@ def build_system_prompt(active_skills: dict) -> str:
 
         OPERATING RULES:
         1. GROUND ANYTHING CURRENT: You have no knowledge of today. For news, headlines, current events, weather, prices, scores, or anything that could have changed since you were trained, you MUST call a tool first and answer only from what it returns. Never state a headline, figure or event you did not just read from a tool result. If a tool fails, say the lookup failed — do not fill the gap from memory.
+        1a. THE ONE EXCEPTION IS THE CLOCK: the current date and time are given to you at the top of every question, so "what time is it", "what is today's date" and "what day of the week is it" are answered directly from that with `action` set to "none". Do not call a tool for the time here — you have it. `world_time` is for another timezone or for counting days between dates, which the timestamp cannot tell you.
         2. TERMINATION: When you have enough information to answer, set `action` to "none" and put your complete reply in `final_answer`. "none" is the correct choice for any request that needs no tool — a greeting, a question you can already answer from durable knowledge, or a chain that has finished. It is NOT correct for anything covered by rule 1.
         3. ANSWER FROM WHAT YOU FETCHED, AND ONLY THAT: Once a tool has returned what you asked for, use it. Do not repeat the same call, and do not end with "I have noted that" — the user wants the content, so put the actual answer in `final_answer`. Your answer must contain no detail the tool did not report. If a result is thin or vague, say exactly what it returned and that it was all you got; padding it with plausible-sounding specifics is the worst thing you can do, because the user cannot tell which half you made up.
         4. CAPABILITY QUESTIONS: "Who are you?", "what can you do?", "what are your abilities?" and anything like them are answered by calling `core_identity`, which reports the tools actually loaded. Never answer from memory — you will describe the operator's expertise instead of your own tools, which is wrong and has happened. Do not call it for anything else.

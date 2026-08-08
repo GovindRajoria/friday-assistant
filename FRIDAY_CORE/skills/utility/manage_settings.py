@@ -64,13 +64,22 @@ class ManageSettingsSkill:
     def __init__(self):
         self.manifest = {
             "name": "manage_settings",
+            # The vocabulary here was measured winning routing decisions it should
+            # have lost. "whether you mute audio... how fast you speak" took all
+            # three volume cases in tools/routing_cases.yaml off media_control,
+            # because a phrase in a description competes on its words and not on
+            # what the skill is for. Both of those now have a skill of their own,
+            # so naming them here is no longer even accurate — the last sentence
+            # is the boundary, stated once rather than implied.
             "description": (
-                "Reads and changes your own settings in conversation — whether you mute "
-                "audio on a privacy anomaly, speak replies aloud, watch the screen, give a "
-                "daily briefing and when, how fast you speak, how you address the user. "
-                "Parameters: 'action' (list, get, set), 'key' like 'privacy.auto_mute', and "
-                "'value'. Use this when asked to stop or start doing something as a standing "
-                "rule rather than once. Changing a setting requires confirmation."
+                "Reads and changes standing settings written to the configuration file: "
+                "whether you mute audio on a privacy anomaly, watch the screen, use the "
+                "vision model, give a daily briefing and when, quiet hours, how you address "
+                "the user. Parameters: 'action' (list, get, set), 'key' like "
+                "'privacy.auto_mute', and 'value'. Use this when asked to change a standing "
+                "rule rather than to do something once. For the volume of the speakers use "
+                "media_control; for how fast or whether you speak, use voice_control. "
+                "Changing a setting requires confirmation."
             ),
             "parameters": ["action", "key", "value"],
             "destructive": True,
@@ -266,10 +275,19 @@ class ManageSettingsSkill:
 
     @staticmethod
     def _unknown(key):
+        # The nearest match *and* the full list, unlike the spoken skills, which
+        # get the suggestion alone. This message goes back to the model as an
+        # Observation rather than to a person as speech, and a model that is one
+        # character off benefits from the correction while one that guessed
+        # wildly benefits from the menu. Reading fourteen dotted key names aloud
+        # would be the wrong answer; being handed them is not.
+        from core.nearest import did_you_mean
+
         return {
             "status": "error",
-            "message": (f"'{key}' is not a setting I can change. The ones I can: "
-                        + ", ".join(WRITABLE)),
+            "message": (f"'{key}' is not a setting I can change."
+                        + did_you_mean(key, WRITABLE)
+                        + " The ones I can: " + ", ".join(WRITABLE)),
         }
 
 

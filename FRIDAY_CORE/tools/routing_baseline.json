@@ -1,0 +1,1036 @@
+{
+  "summary": {
+    "cases": 78,
+    "comparable": 78,
+    "unavailable": 0,
+    "hit": 66,
+    "accuracy": 84.6,
+    "seconds": 123.2,
+    "groups": {
+      "greetings and small talk": {
+        "hit": 7,
+        "of": 9,
+        "unavailable": 0
+      },
+      "itself": {
+        "hit": 11,
+        "of": 11,
+        "unavailable": 0
+      },
+      "no tool needed": {
+        "hit": 1,
+        "of": 5,
+        "unavailable": 0
+      },
+      "the clock": {
+        "hit": 5,
+        "of": 5,
+        "unavailable": 0
+      },
+      "current and outside": {
+        "hit": 6,
+        "of": 7,
+        "unavailable": 0
+      },
+      "reading what is in front of it": {
+        "hit": 6,
+        "of": 7,
+        "unavailable": 0
+      },
+      "the machine": {
+        "hit": 11,
+        "of": 11,
+        "unavailable": 0
+      },
+      "development": {
+        "hit": 6,
+        "of": 6,
+        "unavailable": 0
+      },
+      "life admin": {
+        "hit": 6,
+        "of": 8,
+        "unavailable": 0
+      },
+      "destructive, must still route right": {
+        "hit": 3,
+        "of": 4,
+        "unavailable": 0
+      },
+      "voice": {
+        "hit": 4,
+        "of": 5,
+        "unavailable": 0
+      }
+    },
+    "by_stage": {
+      "fast path": {
+        "hit": 7,
+        "of": 7
+      },
+      "model": {
+        "hit": 46,
+        "of": 58
+      },
+      "dispatch": {
+        "hit": 13,
+        "of": 13
+      }
+    }
+  },
+  "results": [
+    {
+      "group": "greetings and small talk",
+      "say": "hello",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.01
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "hi friday",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "hey",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "good morning",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "how are you",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "thanks",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "thank you that was helpful",
+      "expect": [
+        "converse"
+      ],
+      "chose": "voice_control",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 9.41
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "yes?",
+      "expect": [
+        "converse"
+      ],
+      "chose": "converse",
+      "correct": true,
+      "decided_by": "fast path",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "greetings and small talk",
+      "say": "nice one",
+      "expect": [
+        "converse"
+      ],
+      "chose": "none",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 4.2
+    },
+    {
+      "group": "itself",
+      "say": "who are you",
+      "expect": [
+        "core_identity"
+      ],
+      "chose": "core_identity",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "what can you do",
+      "expect": [
+        "core_identity"
+      ],
+      "chose": "core_identity",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "what are your abilities",
+      "expect": [
+        "core_identity"
+      ],
+      "chose": "core_identity",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "how do you work",
+      "expect": [
+        "explain_architecture"
+      ],
+      "chose": "explain_architecture",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "what is langgraph for",
+      "expect": [
+        "explain_architecture"
+      ],
+      "chose": "explain_architecture",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "how do you hear me",
+      "expect": [
+        "explain_architecture"
+      ],
+      "chose": "explain_architecture",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "how do you keep me safe",
+      "expect": [
+        "explain_architecture"
+      ],
+      "chose": "explain_architecture",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "are any of your skills broken",
+      "expect": [
+        "skill_health",
+        "diagnose_self"
+      ],
+      "chose": "skill_health",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "why did you do that",
+      "expect": [
+        "explain_last_turn"
+      ],
+      "chose": "explain_last_turn",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "what did you just do",
+      "expect": [
+        "explain_last_turn"
+      ],
+      "chose": "explain_last_turn",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "itself",
+      "say": "are you healthy",
+      "expect": [
+        "diagnose_self",
+        "skill_health",
+        "system_check"
+      ],
+      "chose": "diagnose_self",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "no tool needed",
+      "say": "what is 15 percent of 240",
+      "expect": [
+        "none"
+      ],
+      "chose": "web_search",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 3.03
+    },
+    {
+      "group": "no tool needed",
+      "say": "how many bytes in a gigabyte",
+      "expect": [
+        "none"
+      ],
+      "chose": "none",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.92
+    },
+    {
+      "group": "no tool needed",
+      "say": "what does GPU stand for",
+      "expect": [
+        "none"
+      ],
+      "chose": "gpu_status",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.5
+    },
+    {
+      "group": "no tool needed",
+      "say": "explain what a mutex is",
+      "expect": [
+        "none"
+      ],
+      "chose": "web_search",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.46
+    },
+    {
+      "group": "no tool needed",
+      "say": "what is the difference between a list and a tuple",
+      "expect": [
+        "none"
+      ],
+      "chose": "search_files",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.76
+    },
+    {
+      "group": "the clock",
+      "say": "what time is it",
+      "expect": [
+        "none",
+        "world_time"
+      ],
+      "chose": "world_time",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "the clock",
+      "say": "what is the date today",
+      "expect": [
+        "none",
+        "world_time"
+      ],
+      "chose": "world_time",
+      "correct": true,
+      "decided_by": "dispatch",
+      "available": true,
+      "seconds": 0.0
+    },
+    {
+      "group": "the clock",
+      "say": "what time is it in london",
+      "expect": [
+        "world_time"
+      ],
+      "chose": "world_time",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.75
+    },
+    {
+      "group": "the clock",
+      "say": "how many days until christmas",
+      "expect": [
+        "world_time"
+      ],
+      "chose": "world_time",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.96
+    },
+    {
+      "group": "the clock",
+      "say": "what day of the week is the first of january",
+      "expect": [
+        "world_time",
+        "none"
+      ],
+      "chose": "none",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.97
+    },
+    {
+      "group": "current and outside",
+      "say": "what is the weather like",
+      "expect": [
+        "weather"
+      ],
+      "chose": "weather",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.73
+    },
+    {
+      "group": "current and outside",
+      "say": "is it going to rain tomorrow",
+      "expect": [
+        "weather"
+      ],
+      "chose": "weather",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.48
+    },
+    {
+      "group": "current and outside",
+      "say": "what is in the news",
+      "expect": [
+        "read_news"
+      ],
+      "chose": "read_news",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.43
+    },
+    {
+      "group": "current and outside",
+      "say": "any headlines about openvino",
+      "expect": [
+        "web_search",
+        "read_news"
+      ],
+      "chose": "read_news",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.77
+    },
+    {
+      "group": "current and outside",
+      "say": "look up the yolo11 benchmark numbers",
+      "expect": [
+        "web_search"
+      ],
+      "chose": "search_code",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.05
+    },
+    {
+      "group": "current and outside",
+      "say": "read me that page at docs.ultralytics.com",
+      "expect": [
+        "read_webpage"
+      ],
+      "chose": "read_webpage",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.92
+    },
+    {
+      "group": "current and outside",
+      "say": "open youtube",
+      "expect": [
+        "open_url",
+        "launch_application"
+      ],
+      "chose": "open_url",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.78
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "summarise the resume pdf in my workspace",
+      "expect": [
+        "read_document"
+      ],
+      "chose": "read_document",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.3
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "what is in the quarterly numbers spreadsheet",
+      "expect": [
+        "read_spreadsheet"
+      ],
+      "chose": "read_spreadsheet",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.41
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "find the file with the camera config in it",
+      "expect": [
+        "search_files"
+      ],
+      "chose": "search_code",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.41
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "read the text off this error dialog",
+      "expect": [
+        "ocr_screen"
+      ],
+      "chose": "ocr_screen",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.15
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "what is on my screen right now",
+      "expect": [
+        "describe_screen"
+      ],
+      "chose": "describe_screen",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.9
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "take a screenshot",
+      "expect": [
+        "screenshot"
+      ],
+      "chose": "screenshot",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.39
+    },
+    {
+      "group": "reading what is in front of it",
+      "say": "how many people are in the room",
+      "expect": [
+        "scan_environment"
+      ],
+      "chose": "scan_environment",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.86
+    },
+    {
+      "group": "the machine",
+      "say": "turn the volume down",
+      "expect": [
+        "media_control"
+      ],
+      "chose": "media_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.93
+    },
+    {
+      "group": "the machine",
+      "say": "mute the audio",
+      "expect": [
+        "media_control"
+      ],
+      "chose": "media_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.54
+    },
+    {
+      "group": "the machine",
+      "say": "set the volume to thirty percent",
+      "expect": [
+        "media_control"
+      ],
+      "chose": "media_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.63
+    },
+    {
+      "group": "the machine",
+      "say": "how much disk space is left",
+      "expect": [
+        "disk_report",
+        "system_check"
+      ],
+      "chose": "disk_report",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.63
+    },
+    {
+      "group": "the machine",
+      "say": "am I online",
+      "expect": [
+        "network_status"
+      ],
+      "chose": "network_status",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.81
+    },
+    {
+      "group": "the machine",
+      "say": "what is using all my memory",
+      "expect": [
+        "manage_processes",
+        "system_check"
+      ],
+      "chose": "manage_processes",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.0
+    },
+    {
+      "group": "the machine",
+      "say": "open notepad",
+      "expect": [
+        "launch_application"
+      ],
+      "chose": "launch_application",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.66
+    },
+    {
+      "group": "the machine",
+      "say": "minimise this window",
+      "expect": [
+        "window_control"
+      ],
+      "chose": "window_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.63
+    },
+    {
+      "group": "the machine",
+      "say": "copy that to my clipboard",
+      "expect": [
+        "clipboard"
+      ],
+      "chose": "clipboard",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.36
+    },
+    {
+      "group": "the machine",
+      "say": "lock the screen",
+      "expect": [
+        "power_control"
+      ],
+      "chose": "power_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.73
+    },
+    {
+      "group": "the machine",
+      "say": "how is the machine doing",
+      "expect": [
+        "system_check",
+        "diagnose_self"
+      ],
+      "chose": "system_check",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.15
+    },
+    {
+      "group": "development",
+      "say": "is my code committed",
+      "expect": [
+        "inspect_repo",
+        "run_command"
+      ],
+      "chose": "inspect_repo",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.82
+    },
+    {
+      "group": "development",
+      "say": "what branch am I on",
+      "expect": [
+        "inspect_repo",
+        "run_command"
+      ],
+      "chose": "inspect_repo",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.76
+    },
+    {
+      "group": "development",
+      "say": "find where set_volume is defined",
+      "expect": [
+        "search_code"
+      ],
+      "chose": "search_code",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.45
+    },
+    {
+      "group": "development",
+      "say": "is the gpu being used",
+      "expect": [
+        "gpu_status"
+      ],
+      "chose": "gpu_status",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.12
+    },
+    {
+      "group": "development",
+      "say": "run the tests",
+      "expect": [
+        "run_tests"
+      ],
+      "chose": "run_tests",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.05
+    },
+    {
+      "group": "development",
+      "say": "is the camera on the gate still streaming",
+      "expect": [
+        "check_camera_stream"
+      ],
+      "chose": "check_camera_stream",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.32
+    },
+    {
+      "group": "life admin",
+      "say": "remind me to call the site in twenty minutes",
+      "expect": [
+        "reminders"
+      ],
+      "chose": "reminders",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.17
+    },
+    {
+      "group": "life admin",
+      "say": "what am I supposed to be doing today",
+      "expect": [
+        "task_list",
+        "calendar",
+        "reminders"
+      ],
+      "chose": "calendar",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.59
+    },
+    {
+      "group": "life admin",
+      "say": "add finish the report to my list",
+      "expect": [
+        "task_list"
+      ],
+      "chose": "none",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.36
+    },
+    {
+      "group": "life admin",
+      "say": "what is on my calendar this week",
+      "expect": [
+        "calendar"
+      ],
+      "chose": "calendar",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.63
+    },
+    {
+      "group": "life admin",
+      "say": "any new email",
+      "expect": [
+        "check_email"
+      ],
+      "chose": "check_email",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.63
+    },
+    {
+      "group": "life admin",
+      "say": "how do you say good evening in hindi",
+      "expect": [
+        "translate"
+      ],
+      "chose": "translate",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.68
+    },
+    {
+      "group": "life admin",
+      "say": "remember that I prefer metric units",
+      "expect": [
+        "manage_memory"
+      ],
+      "chose": "manage_memory",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.86
+    },
+    {
+      "group": "life admin",
+      "say": "write today down as a good day",
+      "expect": [
+        "journal"
+      ],
+      "chose": "none",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 4.33
+    },
+    {
+      "group": "destructive, must still route right",
+      "say": "delete the temp folder in my workspace",
+      "expect": [
+        "manage_files"
+      ],
+      "chose": "manage_files",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 2.29
+    },
+    {
+      "group": "destructive, must still route right",
+      "say": "kill the chrome process",
+      "expect": [
+        "manage_processes"
+      ],
+      "chose": "manage_processes",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.54
+    },
+    {
+      "group": "destructive, must still route right",
+      "say": "restart the machine",
+      "expect": [
+        "power_control"
+      ],
+      "chose": "power_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.68
+    },
+    {
+      "group": "destructive, must still route right",
+      "say": "type this into the document for me",
+      "expect": [
+        "send_keys"
+      ],
+      "chose": "draft_document",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.81
+    },
+    {
+      "group": "voice",
+      "say": "you are talking too fast",
+      "expect": [
+        "voice_control"
+      ],
+      "chose": "voice_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.71
+    },
+    {
+      "group": "voice",
+      "say": "speak more slowly",
+      "expect": [
+        "voice_control"
+      ],
+      "chose": "voice_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.75
+    },
+    {
+      "group": "voice",
+      "say": "say that again",
+      "expect": [
+        "voice_control",
+        "explain_last_turn"
+      ],
+      "chose": "none",
+      "correct": false,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.94
+    },
+    {
+      "group": "voice",
+      "say": "stop talking",
+      "expect": [
+        "voice_control"
+      ],
+      "chose": "voice_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.39
+    },
+    {
+      "group": "voice",
+      "say": "use a different voice",
+      "expect": [
+        "voice_control",
+        "manage_settings"
+      ],
+      "chose": "voice_control",
+      "correct": true,
+      "decided_by": "model",
+      "available": true,
+      "seconds": 1.72
+    }
+  ]
+}

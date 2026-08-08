@@ -33,6 +33,13 @@ pillow
 # Document drafting skill
 python-docx
 
+# The IANA timezone database, for world_time. Named explicitly rather than
+# inherited: Linux and macOS have a system copy that zoneinfo reads, and Windows
+# has none at all — ZoneInfo("Asia/Tokyo") raises there unless this is installed.
+# It arrived transitively on the development machine, which is exactly how a
+# dependency ends up working here and nowhere else.
+tzdata
+
 # Reading skills (5a). pypdf for read_document, openpyxl for read_spreadsheet,
 # icalendar for the calendar skill's .ics parsing. All three are imported inside
 # the method that needs them, never at module scope — core/registry.py drops a

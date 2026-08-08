@@ -454,14 +454,16 @@ const DICTATION_SHORTCUT = "CommandOrControl+Shift+Space";
 
 function registerDictationShortcut(win: BrowserWindow): void {
   // Returns false when another application already holds the combination.
-  // Worth reporting rather than swallowing: the button in the HUD still works,
+  // Worth reporting rather than swallowing: the renderer listens for the same
+  // keys itself, so the combination still works while this window has focus,
   // and the operator would otherwise be left pressing keys that do nothing
-  // with no clue why.
+  // outside it with no clue why.
   const registered = globalShortcut.register(DICTATION_SHORTCUT, () => {
     win.webContents.send("hud:toggle-dictation");
   });
   if (!registered) {
-    console.warn(`[friday-desktop] ${DICTATION_SHORTCUT} is already taken; use the Speak button.`);
+    console.warn(`[friday-desktop] ${DICTATION_SHORTCUT} is already taken globally; `
+      + "it still works while the HUD has focus.");
   }
 }
 

@@ -514,6 +514,8 @@ class _FakeTranscriber:
 def test_a_recorded_utterance_comes_back_as_a_transcript(monkeypatch, no_loaded_model):
     heard = _FakeTranscriber("what is the weather in Bhopal")
     monkeypatch.setattr(server_app, "_build_transcriber", lambda: heard)
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: _decision(final_answer="warm and dry"))
 
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_bytes(b"pretend this is WebM/Opus")
@@ -526,21 +528,84 @@ def test_a_recorded_utterance_comes_back_as_a_transcript(monkeypatch, no_loaded_
     assert heard.received == [b"pretend this is WebM/Opus"]
 
 
-def test_a_transcript_does_not_start_a_turn(monkeypatch, no_loaded_model):
-    # The whole reason `transcript` is its own event: what was heard goes to
-    # the prompt box for the operator to look at. If the server ran it, a
-    # misheard sentence would become a request this assistant carries out,
-    # and the skills it can reach include deleting files.
-    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("delete everything"))
-    called = []
-    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: called.append(a) or _decision(action="none"))
+def test_a_transcript_runs_as_the_turn_it_was_heard_as(monkeypatch, no_loaded_model):
+    """The auto-submit change, asserted at the seam it changed.
+
+    This test previously asserted the opposite — that a push-to-talk transcript
+    did NOT run — and the review step it was protecting was real. It is replaced
+    rather than deleted because the protection was replaced rather than dropped:
+    the confirmation gate still fronts every destructive skill (the two tests
+    below this one), and `Stop` is still live for the length of a turn. What went
+    away is the click between speaking and being answered, which is most of the
+    point of speaking.
+    """
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("read the news"))
+    asked = []
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: asked.append(a) or _decision(final_answer="two headlines"))
 
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_bytes(b"audio")
         assert ws.receive_json()["type"] == "transcript"
+        # Waited for on the clock rather than by reading the socket until an
+        # `answer` shows up. A regression here means the turn never starts, and
+        # `receive_json` on a socket that has gone quiet blocks forever — so the
+        # obvious version of this test hangs the suite instead of failing it.
+        # Found by breaking the behaviour on purpose, which is the whole reason
+        # this project's rule says to.
+        deadline = time.time() + 5
+        while not asked and time.time() < deadline:
+            time.sleep(0.02)
 
-    assert called == []
-    assert server_app._busy is False
+    assert asked, "the utterance was transcribed and then never run"
+
+
+class _FakeSpeech:
+    """Stands in for _SpeechThread. Records instead of opening a COM engine."""
+
+    def __init__(self):
+        self.said = []
+        self.silenced = 0
+
+    def speak(self, text):
+        self.said.append(text)
+
+    def silence(self):
+        self.silenced += 1
+
+
+def test_a_spoken_request_refused_while_busy_says_so_out_loud(monkeypatch, no_loaded_model):
+    """Audible, not merely broadcast — nobody hands-free is watching the window.
+
+    Asserted off the recorded broadcasts rather than by reading the socket for a
+    second event. If this behaviour regresses, no second event ever arrives, and
+    a blocking `receive_json` would hang the suite where it should fail it.
+    """
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("and the weather"))
+    speech = _FakeSpeech()
+    monkeypatch.setattr(server_app, "_speech", speech)
+    sent = []
+    original = server_app._broadcast
+
+    async def record(event):
+        sent.append(event)
+        await original(event)
+
+    monkeypatch.setattr(server_app, "_broadcast", record)
+
+    server_app._busy = True
+    try:
+        with TestClient(app).websocket_connect("/ws") as ws:
+            ws.send_bytes(b"audio")
+            deadline = time.time() + 5
+            while len(sent) < 2 and time.time() < deadline:
+                time.sleep(0.02)
+    finally:
+        server_app._busy = False
+
+    assert [event["type"] for event in sent] == ["transcript", "status"]
+    assert "still working" in sent[1]["payload"]["text"]
+    assert speech.said == [sent[1]["payload"]["text"]], "the refusal was never spoken"
 
 
 def test_silence_says_so_rather_than_going_quiet(monkeypatch, no_loaded_model):
@@ -693,25 +758,30 @@ def test_ambient_audio_with_the_wake_word_runs_the_turn(monkeypatch, no_loaded_m
     assert prompts, "the turn never reached the model"
 
 
-def test_push_to_talk_still_only_reports_and_never_runs(monkeypatch, no_loaded_model):
-    """The default mode is unchanged, and that safety property is the reason
-    ambient mode had to be opt-in rather than a replacement."""
+def test_push_to_talk_needs_no_wake_word_and_keeps_the_words_it_heard(monkeypatch, no_loaded_model):
+    """Push-to-talk is addressed by the press, so the name is neither required
+    nor removed.
+
+    Ambient mode strips the name because it is a gate there, and passing "Friday,
+    what is the weather" to the model would be handing it the doorbell along with
+    the question. A deliberate recording has no gate to strip: whatever was said
+    into it is the request, verbatim, including a name that was not needed.
+    """
     monkeypatch.setattr(
         server_app, "_build_transcriber",
-        lambda: _FakeTranscriber(text="Friday, delete everything"),
+        lambda: _FakeTranscriber(text="Friday, what is the weather"),
     )
-    turns = []
+    asked = []
     monkeypatch.setattr("core.llm_client.chat",
-                        lambda *a, **k: turns.append(1) or _decision(action="none", thought="", final_answer="x"))
+                        lambda *a, **k: asked.append(a) or _decision(final_answer="warm"))
 
     with TestClient(app).websocket_connect("/ws") as ws:
         ws.send_bytes(b"audio")                    # no listen_mode sent at all
         event = ws.receive_json()
 
     assert event["type"] == "transcript"
-    # Not stripped, not acted on: it goes to the prompt box verbatim for review.
-    assert event["payload"]["text"] == "Friday, delete everything"
-    assert turns == []
+    assert event["payload"]["text"] == "Friday, what is the weather"
+    assert asked, "a deliberate recording was not run"
 
 
 def test_the_wake_word_alone_is_answered_without_a_tool(monkeypatch, no_loaded_model):
@@ -746,3 +816,74 @@ def test_a_failed_ambient_transcription_is_silent(monkeypatch, no_loaded_model):
         event = ws.receive_json()
 
     assert "Continuous listening off" in event["payload"]["text"]
+
+
+def test_saying_stop_cuts_the_speech_and_runs_nothing(monkeypatch, no_loaded_model):
+    """"Stop" has to get through while busy, which is the one case it is for.
+
+    It is therefore handled before both gates that stand in front of everything
+    else: before the wake word, because somebody interrupting will not stop to
+    say the name, and before the single-flight check, because a request that is
+    only honoured when nothing is running is not an interruption at all.
+    """
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("stop"))
+    speech = _FakeSpeech()
+    monkeypatch.setattr(server_app, "_speech", speech)
+    turns = []
+    monkeypatch.setattr("core.llm_client.chat", lambda *a, **k: turns.append(a) or _decision())
+
+    server_app._busy = True
+    try:
+        with TestClient(app).websocket_connect("/ws") as ws:
+            ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+            ws.receive_json()
+            ws.send_bytes(b"audio")
+            event = ws.receive_json()
+    finally:
+        server_app._busy = False
+
+    assert event["type"] == "status"
+    assert event["payload"]["text"] == "Stopped."
+    assert speech.silenced == 1
+    # The turn in flight is told to end, and no new one starts.
+    assert server_app.interrupter.interrupted is True
+    assert turns == []
+    # Answering "be quiet" out loud would be a joke at the operator's expense.
+    assert speech.said == []
+
+
+def test_stop_is_not_broadcast_as_something_it_was_heard_to_ask_for(monkeypatch, no_loaded_model):
+    # No `transcript` event: there is no request to record, and showing "stop" as
+    # a prompt in the log would read as a turn that produced nothing.
+    monkeypatch.setattr(server_app, "_build_transcriber", lambda: _FakeTranscriber("friday be quiet"))
+    monkeypatch.setattr(server_app, "_speech", _FakeSpeech())
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_bytes(b"audio")
+        event = ws.receive_json()
+
+    assert event["type"] == "status"
+
+
+def test_a_request_that_merely_starts_with_stop_still_runs(monkeypatch, no_loaded_model):
+    """The expensive direction. "Stop the build" is a request, and one that
+    reaches a skill; swallowing it as "be quiet" looks like being ignored."""
+    monkeypatch.setattr(server_app, "_build_transcriber",
+                        lambda: _FakeTranscriber("friday stop the build"))
+    speech = _FakeSpeech()
+    monkeypatch.setattr(server_app, "_speech", speech)
+    asked = []
+    monkeypatch.setattr("core.llm_client.chat",
+                        lambda *a, **k: asked.append(a) or _decision(final_answer="stopped it"))
+
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "listen_mode", "ambient": True}))
+        ws.receive_json()
+        ws.send_bytes(b"audio")
+        assert ws.receive_json() == {"type": "transcript", "payload": {"text": "stop the build"}}
+        deadline = time.time() + 5
+        while not asked and time.time() < deadline:
+            time.sleep(0.02)
+
+    assert asked, "a real request was swallowed as a command to be quiet"
+    assert speech.silenced == 0

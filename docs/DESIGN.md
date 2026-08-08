@@ -488,15 +488,207 @@ stronger. And the layer that actually stops damage was never the review step —
 is the confirmation gate, which is untouched, so the worst an unreviewed
 mishearing reaches on its own is a read-only skill.
 
+**Why the review step went entirely (2026-08-07).** The paragraph above ends up
+proving more than it set out to. If the confirmation gate is the layer that stops
+damage, and an act of address is what distinguishes a request from ambient audio,
+then a press is an act of address too — a deliberate one — and the review step
+was buying very little at the cost of making speech slower than typing. The
+operator's own verdict was blunter: *"what's the point of speaking if I have to
+click to send that."* Both microphone paths now run what they heard.
+
+The two paths still differ in what they require, and it is not an inconsistency.
+Push-to-talk needs no name because the press is the address; ambient mode does,
+because a microphone open for an hour has nothing else to separate a request from
+the room. They also differ in what they can *hear*: `useMicrophone` releases the
+device inside `recorder.onstop`, before the recording is even sent, so
+push-to-talk cannot capture the answer to its own question. Ambient mode's
+microphone is open while the answer plays, and the platform voice plays out of
+process where `echoCancellation` on the capture stream cannot reach it — so in
+that mode the wake word is also the only thing stopping the assistant from
+hearing itself and replying to it. Relaxing it needs a temporal gate in its place.
+
+**Why the fix for routing was fewer tools rather than better descriptions.** This
+is the one the project spent the longest getting wrong, and the record of the
+wrong turns is more useful than the answer.
+
+Tool selection measured 56% with forty-six skills loaded. Four attempts to improve
+it by giving the model *more* information all failed, and each failed in an
+instructive way. A schema field asking whether a tool was needed before choosing
+which — three variants, one of them taking routing to 39.7%, because the model
+writes the whole object as a script of a finished interaction rather than as a
+classification of the request. Sharper descriptions on the losing skills, which
+worked per skill and moved the attractor to their neighbours. A negative clause
+naming the cases that had been stolen, which changed the score by exactly nothing.
+
+The clue was there the whole time and was easy to misread: several skills that
+*lost* a routing decision already carried a description naming the skill that
+should have won. `system_check` says "gpu_status for accelerators" and still beat
+`gpu_status` on "is the GPU being used". The information was present, correctly
+worded, in the prompt, and not used — which is a statement about attention, not
+about content. Forty-seven descriptions is roughly eight thousand tokens of JSON.
+
+Offering about ten scored skills instead of all forty-seven took routing from
+**70.5% to 84.6%**, like-for-like, with no description changed. Every long-running
+miss cleared at once, including the arithmetic case that had survived three schema
+redesigns: asked how many bytes are in a gigabyte, it now answers without a tool.
+
+Three decisions inside it are worth keeping:
+
+- **Lexical scoring, weighted by inverse document frequency over the manifests.**
+  There is no embedding model installed on this machine, and adding one to rank
+  forty-seven short documents would be a large dependency for a small job. IDF is
+  what makes the lexical version work at all — it prices "use" and "this" at zero
+  because every manifest contains them, and "clipboard" highly because one does.
+- **No confident match, no shortlist.** If nothing scores above a floor the whole
+  registry is offered. The enum is built from the same subset, so a skill left out
+  is not merely ranked badly, it is unnameable — and a ranking built on noise is
+  strictly worse than no ranking.
+- **The size was measured, not chosen.** Every case in the labelled set keeps its
+  correct answer inside a list of eight; ten ships for margin, and a test asserts
+  that recall with no model running, so it is a CI gate rather than a benchmark.
+
+Two descriptions were rewritten because that recall test failed on them, which is
+the opposite of the earlier tuning: `system_check` contained no occurrence of the
+word "machine" and `manage_memory` none of "remember", so the only words anybody
+says when asking for them appeared nowhere in the text being ranked. Adding a word
+the skill genuinely is about is not the same as a skill claiming ground next to it.
+
+**How the improvement was checked against itself.** Four separate changes had by
+then been measured on the same seventy-eight sentences, which is enough for the
+number to be measuring the answer key rather than the assistant. Eighteen held-out
+requests were written after the fact and deliberately phrased away from the
+manifests' own vocabulary; they score **83.3%** where the tuned set scores 84.6%,
+with every case decided by the model. A gap of a point and a bit is what
+generalisation looks like; a gap of twenty would have meant the shortlist only
+worked when the request echoed the description it was ranking against.
+
+The held-out file carries a rule in its header: **nothing may be tuned against
+it.** The temptation after reading its three misses is to fix them, and doing so
+would convert the only honest measurement in the project into a second training
+set. Fix things against `routing_cases.yaml`; come back to this one later.
+
+**What it changed about the remaining errors, which matters more than the score.** All three
+regressions were diagnosed, and in every one the correct skill was offered and the model chose
+something else — `task_list` ranked first by more than double the next score and was still declined
+in favour of "none". So what is left is not a retrieval problem but a selection problem among about
+ten candidates. That is worth stating precisely because it changes what to try next: description
+steering between competing pairs was measured as useless at forty-seven skills, where it moved the
+attractor rather than removing it, but the reason it failed there does not apply to a field of ten.
+
+**What this does not fix.** The shortlist is computed from the operator's words
+alone, so a chain whose second step needs a tool the original sentence did not
+imply can find it missing. No case in the labelled set does that, and the cheap
+answer — widen the list after the first step, since growing an enum is safe where
+shrinking it is not — is deliberately unbuilt, because there is no measurement
+saying it is needed.
+
+**Why the clock is in the prompt and not only a skill.** Nothing in this project
+reported the time until August 2026 — no skill, and no date anywhere in either
+prompt. "What time is it" is close to the most common thing anyone says to an
+assistant, and it scored 0 out of 3 in the routing benchmark. The interesting
+part is that routing was not confused: there was nothing to route to, so the
+model answered from training data, which for a clock means answering wrongly.
+
+Most of the fix is one line in `build_user_message`, because asking a language
+model to invoke a tool to discover what day it is would be a lot of machinery
+for a value the process already holds. But injecting it is not sufficient on its
+own: OPERATING RULE 1 says "You have no knowledge of today... you MUST call a
+tool first", which is exactly correct for news and weather and exactly wrong for
+this. The timestamp needed a matching carve-out in that rule, or the model would
+have kept hunting for a tool while holding the answer.
+
+`world_time` remains, for the two things a static timestamp cannot answer:
+another timezone, and arithmetic between dates. Its offsets are reported in hours
+and minutes rather than decimals — a sixth of the world is not on a whole-hour
+offset, including where this assistant runs, and the 45-minute gap between
+Kolkata and Kathmandu rendered as "0.2 hours ahead" before that was fixed.
+
+**Why `set_volume` was rewritten rather than tuned.** It pressed `volumemute`
+twice "to wake the driver", then `volumedown` fifty times to reach zero, then
+`volumeup` up to fifty times to climb to the requested level, then played a
+1000 Hz beep at the operator. Every part of that is a problem: a hundred
+keystrokes take a visible moment and land on whatever window has focus, and the
+level reached depends on an unverified assumption that the media key steps by 2%.
+`_apply_mute` had already established the CoreAudio path on this machine, and
+`SetMasterVolumeLevelScalar` sets a level exactly, instantly, with no keystrokes.
+Where that interface is unreachable, an absolute level now reports honestly
+instead of approximating one — the same choice the mute path already makes about
+a state it cannot read. The media keys are kept for a *relative* step, where
+there is no target state to get wrong, only a direction.
+
+**Why the follow-up window is timed rather than filtered.** Letting the next
+sentence follow without the name is what makes hands-free feel like a
+conversation instead of a command line, and it is also the change most likely to
+produce a machine that talks to itself forever. The naive version removes the
+only protection against that at precisely the moment audio is playing.
+
+The first design that suggests itself is a text filter: drop anything that looks
+like what was just said. It cannot be the primary gate. There is no threshold
+separating "an echo of my answer" from "the operator repeating my words back at
+me" — which people do constantly, because replying with the words you just heard
+is how conversation works. Measured at 0.75 similarity, *"what is the weather in
+Bhopal"* scores as an echo of *"the weather in Bhopal is warm"*. So the gate is
+temporal and the filter sits behind it, covering only the case the timing cannot:
+the operator talking over the answer, so one recorded segment holds both voices.
+
+Two things about the timing were wrong in the first plan for it, and both matter:
+
+- **It must run from playback finishing, not from the turn ending.** The answer
+  is handed to a queue and `_run_prompt` returns immediately, so the speakers are
+  frequently still going seconds after the turn is over. `runAndWait()` having
+  returned is the only trustworthy signal on this platform, which is why the
+  speech thread publishes it.
+- **It must be measured against when the audio was recorded, not when it
+  arrived.** This is the one that would have shipped broken. Transcription takes
+  one to two seconds, so by the time an utterance is evaluated, an echo has
+  already aged past any grace interval anyone would pick — the gate would admit
+  exactly what it was written to exclude. The recording time is stamped the
+  moment the binary frame lands, which is within milliseconds of the segment
+  being cut, and that only holds because the HUD ships a segment straight out of
+  `recorder.onstop` with nothing slow in between. Adding an `await` to that path
+  would reopen the hole silently, so it is named in the docstring.
+
+The grace interval before the window opens is arithmetic, not preference: a
+segment that recorded the tail of playback is not cut until `SILENCE_MS_TO_END`
+of silence has passed, so it ends *after* the audio did. The grace must exceed
+that. Those two constants are in different languages in different directories,
+and raising `SILENCE_MS_TO_END` to stop cutting people off at commas is a
+plausible future change that would quietly reopen the loop — so a test reads the
+TypeScript and asserts the relationship.
+
+**Why one control replaced two.** The command bar had **Speak** and **Wake
+word** side by side, and the operator's complaint about the arrangement was the
+arrangement. Two controls for one capability make somebody decide which kind of
+microphone they want before they have said anything — a question about this
+program's internals wearing the clothes of a question about their intent. There
+is one control now, showing off / listening / hearing you / working, and
+push-to-talk kept its hotkey and lost its button. `src/voice.ts` derives that
+state in a pure function so the precedence between those states can be asserted;
+the case worth asserting is that a running turn outranks "hearing you", because
+the open microphone genuinely is picking up the assistant's own voice at that
+moment and saying so reads as a malfunction.
+
+Dropping the button did leave one real hole: if another application already
+holds `Ctrl+Shift+Space`, push-to-talk had no way in at all. The renderer now
+listens for the same combination itself, which covers exactly the case the
+global registration cannot — this window having focus.
+
 ## What CI verifies
 
 Lint with a pinned rule set, `compileall` over `core`, `skills`, `benchmarks`
 and `tools`, `tools/check_manifests.py` on Python 3.10 and 3.12, and now
-`pytest` against `FRIDAY_CORE/tests/` — 523 tests covering graph routing, the
+`pytest` against `FRIDAY_CORE/tests/` — 728 tests covering graph routing, the
 anomaly guard and its privacy switch, the step bound, the confirmation gate, the
-path allowlist, the mute path with the COM layer stubbed, the server, and a
+path allowlist, the volume and mute paths with the COM layer stubbed, the server,
+the speech pipeline and the follow-up window with the engine faked, and a
 regression test for the placeholder-answer failure described above, all run
 against fake skills and a mocked `llm_client.chat`, no model required.
+
+One test reaches outside Python: `test_follow_up_window.py` reads
+`useAlwaysListening.ts` and asserts that the follow-up grace interval still
+exceeds the segmenter's silence window. Those two constants have to hold a
+relationship and live in different languages, and the failure mode if they drift
+is the assistant answering its own voice, so the coupling is worth a file read.
 
 `requirements.txt` is still deliberately not installed in full. It pulls
 `ultralytics`, `torch`, `faster-whisper`, `pyttsx3` and `pynput` — gigabytes of

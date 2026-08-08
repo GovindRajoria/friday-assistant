@@ -1,0 +1,230 @@
+# Labelled request set for tool-selection accuracy. Scored by tools/routing_bench.py.
+#
+# This file is the answer key to the question this project could not answer:
+# given 45 skills, how often does the model reach for the right one? The count
+# went 19 -> 46 in one batch and measurably broke "hello", which nothing caught
+# because nothing was measuring. A number that moves when the skill set changes
+# is the only way to tell an addition from a regression.
+#
+# `expect` is a LIST because several of these have more than one defensible
+# answer. "Is my code committed?" is `inspect_repo`, but reaching `run_command`
+# with `git status` is not wrong, and marking it wrong would train the answer
+# key rather than the assistant. A single-element list means there is genuinely
+# one right instrument.
+#
+# Three special values:
+#   converse  — the small-talk fast path answered without asking the model
+#   none      — the model chose the "no tool" sentinel, which is correct here
+#   any_of    — not used; write the list instead
+#
+# Keep the wording as somebody would actually say it out loud, contractions and
+# all. A benchmark written in careful prose measures a request nobody makes.
+
+- group: greetings and small talk
+  why: >
+    Every one of these went through twenty tool calls and a full inventory of
+    the skill list on 2026-08-04. They are the reason any of this was measured.
+  cases:
+    - say: hello
+      expect: [converse]
+    - say: hi friday
+      expect: [converse]
+    - say: hey
+      expect: [converse]
+    - say: good morning
+      expect: [converse]
+    - say: how are you
+      expect: [converse]
+    - say: thanks
+      expect: [converse]
+    - say: thank you that was helpful
+      expect: [converse]
+    - say: yes?
+      expect: [converse]
+    - say: nice one
+      expect: [converse]
+
+- group: itself
+  why: >
+    Answering these from memory produces a description of the operator's
+    expertise instead of the loaded tools. It has happened.
+  cases:
+    - say: who are you
+      expect: [core_identity]
+    - say: what can you do
+      expect: [core_identity]
+    - say: what are your abilities
+      expect: [core_identity]
+    - say: how do you work
+      expect: [explain_architecture]
+    - say: what is langgraph for
+      expect: [explain_architecture]
+    - say: how do you hear me
+      expect: [explain_architecture]
+    - say: how do you keep me safe
+      expect: [explain_architecture]
+    - say: are any of your skills broken
+      expect: [skill_health, diagnose_self]
+    - say: why did you do that
+      expect: [explain_last_turn]
+    - say: what did you just do
+      expect: [explain_last_turn]
+    - say: are you healthy
+      expect: [diagnose_self, skill_health, system_check]
+
+- group: no tool needed
+  why: >
+    Rule 1 in the system prompt forbids a maths tool and requires arithmetic in
+    the thought. That rule only holds if the model actually obeys it, and the
+    live session showed it reaching for search on questions like these.
+  cases:
+    - say: what is 15 percent of 240
+      expect: [none]
+    - say: how many bytes in a gigabyte
+      expect: [none]
+    - say: what does GPU stand for
+      expect: [none]
+    - say: explain what a mutex is
+      expect: [none]
+    - say: what is the difference between a list and a tuple
+      expect: [none]
+
+- group: the clock
+  why: >
+    The local date and time is injected into every turn now, so the common case
+    costs no tool call. Another timezone and date arithmetic still do.
+  cases:
+    - say: what time is it
+      expect: [none, world_time]
+    - say: what is the date today
+      expect: [none, world_time]
+    - say: what time is it in london
+      expect: [world_time]
+    - say: how many days until christmas
+      expect: [world_time]
+    - say: what day of the week is the first of january
+      expect: [world_time, none]
+
+- group: current and outside
+  cases:
+    - say: what is the weather like
+      expect: [weather]
+    - say: is it going to rain tomorrow
+      expect: [weather]
+    - say: what is in the news
+      expect: [read_news]
+    - say: any headlines about openvino
+      expect: [web_search, read_news]
+    - say: look up the yolo11 benchmark numbers
+      expect: [web_search]
+    - say: read me that page at docs.ultralytics.com
+      expect: [read_webpage]
+    - say: open youtube
+      expect: [open_url, launch_application]
+
+- group: reading what is in front of it
+  cases:
+    - say: summarise the resume pdf in my workspace
+      expect: [read_document]
+    - say: what is in the quarterly numbers spreadsheet
+      expect: [read_spreadsheet]
+    - say: find the file with the camera config in it
+      expect: [search_files]
+    - say: read the text off this error dialog
+      expect: [ocr_screen]
+    - say: what is on my screen right now
+      expect: [describe_screen]
+    - say: take a screenshot
+      expect: [screenshot]
+    - say: how many people are in the room
+      expect: [scan_environment]
+
+- group: the machine
+  cases:
+    - say: turn the volume down
+      expect: [media_control]
+    - say: mute the audio
+      expect: [media_control]
+    - say: set the volume to thirty percent
+      expect: [media_control]
+    - say: how much disk space is left
+      expect: [disk_report, system_check]
+    - say: am I online
+      expect: [network_status]
+    - say: what is using all my memory
+      expect: [manage_processes, system_check]
+    - say: open notepad
+      expect: [launch_application]
+    - say: minimise this window
+      expect: [window_control]
+    - say: copy that to my clipboard
+      expect: [clipboard]
+    - say: lock the screen
+      expect: [power_control]
+    - say: how is the machine doing
+      expect: [system_check, diagnose_self]
+
+- group: development
+  cases:
+    - say: is my code committed
+      expect: [inspect_repo, run_command]
+    - say: what branch am I on
+      expect: [inspect_repo, run_command]
+    - say: find where set_volume is defined
+      expect: [search_code]
+    - say: is the gpu being used
+      expect: [gpu_status]
+    - say: run the tests
+      expect: [run_tests]
+    - say: is the camera on the gate still streaming
+      expect: [check_camera_stream]
+
+- group: life admin
+  cases:
+    - say: remind me to call the site in twenty minutes
+      expect: [reminders]
+    - say: what am I supposed to be doing today
+      expect: [task_list, calendar, reminders]
+    - say: add finish the report to my list
+      expect: [task_list]
+    - say: what is on my calendar this week
+      expect: [calendar]
+    - say: any new email
+      expect: [check_email]
+    - say: how do you say good evening in hindi
+      expect: [translate]
+    - say: remember that I prefer metric units
+      expect: [manage_memory]
+    - say: write today down as a good day
+      expect: [journal]
+
+- group: destructive, must still route right
+  why: >
+    These all stop at the confirmation gate, but the gate only helps if the
+    model reached the right tool in the first place — approving a wrong call is
+    worse than refusing a right one.
+  cases:
+    - say: delete the temp folder in my workspace
+      expect: [manage_files]
+    - say: kill the chrome process
+      expect: [manage_processes]
+    - say: restart the machine
+      expect: [power_control]
+    - say: type this into the document for me
+      expect: [send_keys]
+
+- group: voice
+  why: >
+    A voice-first assistant that cannot change its own voice on request has a
+    gap the operator hits immediately.
+  cases:
+    - say: you are talking too fast
+      expect: [voice_control]
+    - say: speak more slowly
+      expect: [voice_control]
+    - say: say that again
+      expect: [voice_control, explain_last_turn]
+    - say: stop talking
+      expect: [voice_control]
+    - say: use a different voice
+      expect: [voice_control, manage_settings]

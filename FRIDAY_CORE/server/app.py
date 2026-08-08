@@ -33,14 +33,18 @@ import json
 import platform
 import queue
 import threading
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, time
+from time import monotonic
 
 import uvicorn
 from core.config import SETTINGS
 from core.graph import build_graph
 from core.registry import discover_skills
 from core.session import SPOKEN_EVENT_TYPES, run_turn
+from core.small_talk import is_small_talk
+from core.speech_text import for_speech, resembles, sentences
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from server import events
@@ -124,10 +128,39 @@ class _SpeechThread:
     dedicated thread with its own queue keeps the engine's home thread fixed
     no matter which pool thread the graph itself runs on for a given turn;
     callers just enqueue text.
+
+    **One sentence per queue item, not one answer.** That thread affinity also
+    means `engine.stop()` can never be called from anywhere else, so an utterance
+    already being spoken cannot be cut short — the only lever anyone else has is
+    what is still waiting in the queue. Enqueueing per sentence turns that lever
+    into a real interruption, about a second's worth of latency, with no
+    cross-thread call into COM at all. `silence()` is that lever.
+
+    It also publishes when it stopped talking, which is not a convenience: the
+    platform voice plays out of process, so the HUD's microphone hears it and the
+    audio stream's echo cancellation cannot. Anything that decides whether to
+    listen has to know when playback actually ended, and `runAndWait()` returning
+    is the only trustworthy signal for that on this platform.
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings, speaker_factory=None):
+        # `speaker_factory` exists so the queue, the flag and the clock can be
+        # tested without a COM apartment or an audio device — everything above
+        # is ordinary Python, and it was previously untestable only because the
+        # engine was constructed by name inside the thread. Called ON the speech
+        # thread, not here, because whatever it builds is thread-affine.
+        self._speaker_factory = speaker_factory
         self._queue: "queue.Queue[str | None]" = queue.Queue()
+        # Written on the speech thread, read from the event loop. A plain bool is
+        # enough: assignment is atomic under the GIL, both readers only ever ask
+        # "is it talking right now", and a caller that reads it one sentence out
+        # of date is answered again 20 ms later.
+        self._speaking = False
+        self._idle_since = monotonic()
+        # What was last said out loud, for the echo check below. Bounded: an
+        # echo arrives seconds after playback, so a long memory would only add
+        # opportunities to mistake the operator's own words for the assistant's.
+        self._recent: "deque[str]" = deque(maxlen=12)
         self._thread = threading.Thread(target=self._run, args=(settings,), daemon=True)
         self._thread.start()
 
@@ -149,21 +182,87 @@ class _SpeechThread:
             # module-level import would still have made the whole test file
             # uncollectable. Same reason core/llm_client.py imports ollama
             # inside get_client().
-            from core.speaker import FridaySpeaker
+            if self._speaker_factory is not None:
+                speaker = self._speaker_factory()
+            else:
+                from core.speaker import FridaySpeaker
 
-            speaker = FridaySpeaker(settings=settings)
+                speaker = FridaySpeaker(settings=settings)
             while True:
                 text = self._queue.get()
                 if text is None:
                     return
-                speaker.speak(text)
+                self._speaking = True
+                try:
+                    speaker.speak(text)
+                finally:
+                    # Order matters: the flag comes down first, then the clock is
+                    # set, and only when nothing else is waiting. Setting the
+                    # clock after each sentence of a five-sentence answer would
+                    # report "quiet since a moment ago" four times in the middle
+                    # of continuous speech.
+                    self._speaking = False
+                    if self._queue.empty():
+                        self._idle_since = monotonic()
         finally:
             if platform.system() == "Windows":
                 import comtypes
                 comtypes.CoUninitialize()
 
+    @property
+    def speaking(self) -> bool:
+        """Is audio playing, or about to be without another call from anyone?
+
+        The queue counts. A caller asking this to decide whether to listen wants
+        "will sound come out of the speakers in the next moment", and a queue with
+        four sentences left in it answers yes.
+        """
+        return self._speaking or not self._queue.empty()
+
+    @property
+    def quiet_since(self) -> "float | None":
+        """monotonic() when playback last finished, or None while it is talking.
+
+        Monotonic rather than wall clock because this is only ever used to measure
+        an elapsed interval, and a clock that a timezone change or an NTP step can
+        move backwards would open a listening window at the wrong moment.
+        """
+        return None if self.speaking else self._idle_since
+
     def speak(self, text: str) -> None:
-        self._queue.put(text)
+        """Queue one answer, as the sentences it will actually be said in."""
+        for sentence in sentences(for_speech(text)):
+            self._queue.put(sentence)
+            self._recent.append(sentence)
+
+    def sounds_like_something_i_said(self, heard: str) -> bool:
+        """Second line against hearing itself, and only that.
+
+        The gate that matters is temporal — see _follow_up_open — and this covers
+        the one case it cannot: the operator talking over the answer, so a single
+        recorded segment contains both voices and its end lands legitimately
+        inside the window. Bounded to the last few utterances because an echo
+        arrives seconds after the audio, not minutes, and a longer memory only
+        adds chances to match something the operator actually said.
+        """
+        return any(resembles(heard, said) for said in self._recent)
+
+    def silence(self) -> None:
+        """Stop talking after the current sentence.
+
+        Everything still queued is dropped. What is already playing is not — see
+        the class docstring: there is no safe way to interrupt it from here.
+
+        A `None` sitting in the queue would be discarded along with the text,
+        which would strand the thread. In practice nothing calls this after
+        stop(): stop() runs once, from the lifespan handler, as the process is
+        going down.
+        """
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                return
 
     def stop(self) -> None:
         self._queue.put(None)
@@ -298,6 +397,28 @@ _connections: set[WebSocket] = set()
 # Absent means push-to-talk, so a client that never sends `listen_mode` (an older
 # HUD build, or the test suite) behaves exactly as it did before.
 _listen_modes: dict[WebSocket, bool] = {}
+
+# After a spoken turn, the next sentence may follow without the name — this is how
+# long that lasts. Eight seconds is long enough to hear an answer and reply to it,
+# short enough that a room conversation starting a minute later is not caught by it.
+FOLLOW_UP_SECONDS = 8.0
+# ...but not immediately. The window opens this long after playback stops.
+#
+# **This number is arithmetic, not taste.** It has to exceed the segmenter's
+# silence window — SILENCE_MS_TO_END in desktop/src/hooks/useAlwaysListening.ts,
+# currently 850ms — because a segment that recorded the tail of the assistant's
+# own speech is not cut until that much silence has passed, so it ends *after*
+# playback did. Set the grace below that and every answer's own tail arrives
+# inside the window and is run as a request, which is the runaway loop this whole
+# mechanism exists to prevent. tests/test_follow_up_window.py asserts the
+# relationship against the TypeScript, because the two constants are in different
+# languages in different directories and nothing else connects them.
+FOLLOW_UP_GRACE_SECONDS = 1.2
+
+# monotonic() when the last spoken turn ended, or None. Only a turn that began as
+# speech arms this: a typed request opening a window in which the room can start a
+# turn without the name would widen the trigger surface for no benefit.
+_follow_up_armed_at: "float | None" = None
 _memory_buffer: list[str] = []
 _busy = False  # single-flight flag; see the module docstring for why not a lock
 # Strong references to in-flight turn tasks. asyncio only holds a weak one, so
@@ -464,6 +585,23 @@ async def _drain_proactive_events() -> None:
             _speak_proactive(text)
 
 
+def _say(text: str) -> None:
+    """Speak something that did not come out of a turn's event stream.
+
+    `_run_prompt`'s `emit` is what speaks the events of a turn, so anything said
+    before a turn exists — a refusal, most of all — reaches the HUD and nothing
+    else. That was tolerable while every request began with a keystroke and the
+    operator was therefore looking at the window. Hands-free breaks the
+    assumption: a refusal they can only read is one they will not notice, and
+    they will simply say it again into a microphone that is still busy.
+
+    No quiet-hours check, unlike _speak_proactive: this is an answer to something
+    the operator just said out loud, and somebody talking at 03:00 is awake.
+    """
+    if _speech is not None:
+        _speech.speak(text)
+
+
 def _speak_proactive(text: str) -> None:
     """Say it out loud, unless it is the middle of the night.
 
@@ -575,43 +713,109 @@ async def _run_prompt(text: str) -> str:
     return final_answer
 
 
-async def _run_and_release(text: str) -> None:
+async def _run_and_release(text: str, arm_follow_up: bool = False) -> None:
     """Run one turn and clear the single-flight flag however it ends."""
-    global _busy
+    global _busy, _follow_up_armed_at
     try:
         await _run_prompt(text)
     finally:
         _busy = False
+        # Armed on failure as well as success. A turn that fell over is exactly
+        # when somebody says "try again" — refusing to hear that without the
+        # name would be the least helpful possible moment to insist on it.
+        if arm_follow_up:
+            _follow_up_armed_at = monotonic()
 
 
-async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
-    """Transcribe one recorded utterance and either report it or act on it.
+def _follow_up_open(captured_at: "float | None") -> bool:
+    """Was this segment recorded inside the window a spoken turn leaves open?
 
-    **Push-to-talk (`ambient=False`) reports; it does not run.** The text is
-    broadcast as a `transcript` event and lands in the HUD's prompt box, where
-    the operator reads it and presses send. Feeding it straight into the graph
-    would be one keystroke shorter and would mean a misheard sentence becomes a
-    request this assistant acts on — and the actions available to it include
-    deleting files. Recognition being good is the reason that rarely happens;
-    the review step is the reason it does not matter when it does.
+    Answers "may this utterance skip the wake word", and the answer must be no
+    for anything recorded while the assistant was talking. The platform voice
+    plays out of process, so `echoCancellation` on the capture stream never sees
+    it: with this wrong, an answer is re-heard as a request, which produces
+    another answer, which is re-heard.
 
-    **Always-listening (`ambient=True`) runs, but only when addressed.** The
-    review step is replaced by a different gate: the operator has to have said
-    the assistant's name at the start of the sentence. That is a deliberate
-    trade rather than a relaxation — hands-free is the entire point of the mode,
-    and a wake word is an explicit act of address, where a push-to-talk
-    transcript is merely audio the operator happened to record. Everything
-    destructive still stops at the confirmation gate, so the worst a mishearing
-    reaches on its own is a read-only skill.
+    **The measurement is the recording time, not the arrival time**, and that
+    distinction is the whole correctness argument. Transcription takes one to two
+    seconds, so by the time an utterance reaches this function an echo has already
+    aged well past any plausible grace interval — checking the clock here would
+    admit precisely what it was meant to exclude. `captured_at` is stamped in the
+    receive loop the instant the binary frame lands.
+
+    That stamp is only as good as one invariant, held in
+    desktop/src/hooks/useAlwaysListening.ts: a segment is shipped straight out of
+    `recorder.onstop`, with nothing slow between the cut and the send, so arrival
+    is within a few milliseconds of the cut. An `await` added to that path would
+    make every segment look newer than it is and quietly start admitting echo.
+
+    Not disarmed when it is used, deliberately. Nothing can use it twice: a
+    second segment arriving while the follow-up turn runs meets the busy flag,
+    and `quiet_since` is None for as long as there is anything left to say. What
+    disarming *would* cost is the case where a follow-up is accepted and then
+    refused as busy — closing the window there would silently demand the name
+    again from someone who had just been told to wait.
+    """
+    if captured_at is None or _follow_up_armed_at is None:
+        return False
+    base = _follow_up_armed_at
+    if _speech is not None:
+        quiet = _speech.quiet_since
+        if quiet is None:
+            # Still talking, or still holding sentences to say. Nothing being
+            # recorded right now is eligible, whatever it turns out to contain.
+            return False
+        # Whichever finished later. The answer is normally the last thing spoken,
+        # but a status line can outlast the turn that emitted it.
+        base = max(base, quiet)
+    since = captured_at - base
+    return FOLLOW_UP_GRACE_SECONDS <= since <= FOLLOW_UP_SECONDS
+
+
+async def _handle_utterance(audio: bytes, ambient: bool = False, captured_at: "float | None" = None) -> None:
+    """Transcribe one recorded utterance and run it as a turn.
+
+    **Speaking is asking.** Both microphone paths run what they heard; neither
+    parks it anywhere for a second gesture. Until 2026-08-07 push-to-talk
+    broadcast the text and stopped, so a spoken request needed a click to
+    actually happen — which is most of the point of speaking gone, and the
+    operator said so.
+
+    The review step it removes was a real safety layer, so it is *replaced*
+    rather than dropped. Three things stand where it stood:
+
+      * Every `destructive` skill stops at the confirmation gate before it
+        runs (core/nodes/confirm.py), so the worst a mishearing reaches on its
+        own is read-only.
+      * `Stop` is live for the length of a turn, so a turn that started from a
+        mishearing can be ended without waiting for it.
+      * The transcript event still arrives first and is still logged, so what
+        it thought it heard is on screen next to what it did about it.
+
+    **Push-to-talk (`ambient=False`) runs everything it hears.** It cannot
+    hear the answer to its own question: `useMicrophone` ships the recording
+    from `recorder.onstop`, which releases the microphone tracks *before*
+    handing the bytes over, and nothing reopens the stream without another
+    press. That fact is load-bearing — a mode whose microphone is shut while
+    the assistant is talking cannot feed its own answer back in.
+
+    **Always-listening (`ambient=True`) runs only when addressed** — by name, or
+    by replying inside the window a spoken turn leaves open once it has finished
+    talking. Its microphone *is* open while audio plays, and the platform voice
+    plays out of process where the capture stream's echo cancellation cannot
+    reach it, so that window is a temporal gate on when the recording was made
+    rather than a filter on what it says. `_follow_up_open` is the argument.
+
+    `captured_at` is `monotonic()` from the moment the audio arrived, which is
+    within milliseconds of when the segment was cut. It defaults to None for
+    callers that have no such stamp — a test, an older HUD — and None means no
+    follow-up window: the name is then the only way in, which is the behaviour
+    that existed before the window did.
 
     Anything not addressed to the assistant is **discarded silently** — not
     broadcast, not logged, not stored. A continuous microphone that echoed
     every overheard sentence back into the HUD would be a transcript of the
     room, which is not something this project should produce.
-
-    Not gated on `_busy` either. Hearing is not a turn: transcribing while an
-    answer is still streaming is fine, and the operator can line up their
-    next sentence while they wait.
     """
     try:
         text = await _transcribe(audio)
@@ -633,27 +837,61 @@ async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
             await _broadcast(events.envelope(events.STATUS, {"text": "I did not catch that."}))
         return
 
-    if not ambient:
-        await _broadcast(events.envelope(events.TRANSCRIPT, {"text": text}))
+    from core.wake_word import find, is_stop_command
+
+    wake_word = SETTINGS["assistant"].get("wake_word", "friday")
+    if is_stop_command(text, wake_word):
+        # Cut the speech, end whatever is running, and run nothing. Handled
+        # before the wake-word gate because somebody interrupting will not say
+        # the name first, and before the busy check because "stop" is precisely
+        # the thing that must still get through while busy.
+        if _speech is not None:
+            _speech.silence()
+        interrupter.cancel()
+        # Broadcast only. Answering "be quiet" out loud would be a joke at the
+        # operator's expense.
+        await _broadcast(events.envelope(events.STATUS, {"text": "Stopped."}))
         return
 
-    from core.wake_word import find
+    if ambient:
+        addressed, command = find(text, wake_word)
+        if addressed:
+            # The name alone is a request for attention. Handed on as "yes?",
+            # which the conversational entry point answers in one line without a
+            # tool.
+            spoken = command or "yes?"
+        elif _follow_up_open(captured_at):
+            # A reply to something the assistant just said. Repeating the name to
+            # answer a question it asked is the thing that makes hands-free feel
+            # like operating a machine rather than talking to something.
+            if _speech is not None and _speech.sounds_like_something_i_said(text):
+                return              # its own voice, through the room
+            spoken = text
+        else:
+            return                  # room noise; nothing said, nothing kept
+    else:
+        # A deliberate recording is addressed by the act of recording it, so no
+        # wake word is required — saying the name into the push-to-talk button
+        # would be a password, not an address.
+        spoken = text
 
-    addressed, command = find(text, SETTINGS["assistant"].get("wake_word", "friday"))
-    if not addressed:
-        return                      # room noise; nothing said, nothing kept
-
-    # The name alone is a request for attention. Handed on as "yes?", which the
-    # conversational entry point answers in one line without touching a tool.
-    spoken = command or "yes?"
     await _broadcast(events.envelope(events.TRANSCRIPT, {"text": spoken}))
 
     global _busy
     if _busy:
-        # Single-flight, exactly as a typed prompt is. Saying so is better than
-        # dropping it silently, because the operator spoke and heard nothing.
-        await _broadcast(events.envelope(events.STATUS,
-                                        {"text": "I heard you, but I am still working on the last thing."}))
+        # A pleasantry is dropped without a word. "Thank you" arriving while an
+        # answer is still being spoken is not a request being refused — there is
+        # nothing to come back to later — so announcing it out loud interrupts
+        # the answer to say that nothing was going to happen anyway. Observed on
+        # the second real conversation with it, immediately before the operator
+        # switched listening off.
+        if is_small_talk(spoken):
+            return
+        # Everything else is a real request, and is refused out loud rather than
+        # only in the window: whoever spoke may not be looking at it.
+        refusal = "I heard you, but I am still working on the last thing."
+        await _broadcast(events.envelope(events.STATUS, {"text": refusal}))
+        _say(refusal)
         return
 
     # Set here, before the await, and cleared by _run_and_release. Checking the
@@ -661,7 +899,8 @@ async def _handle_utterance(audio: bytes, ambient: bool = False) -> None:
     # arriving close together both pass — and continuous listening produces
     # utterances close together by design, so that window would be hit.
     _busy = True
-    await _run_and_release(spoken)
+    # A spoken turn arms the follow-up window; a typed one does not.
+    await _run_and_release(spoken, arm_follow_up=ambient)
 
 
 @app.websocket("/ws")
@@ -683,6 +922,14 @@ async def ws_endpoint(websocket: WebSocket):
             # hands the whole surface to any web page the operator visits.
             # The WebSocket is already open and already exempt from that.
             message = await websocket.receive()
+            # Stamped here, before anything else runs, because this is the
+            # closest this process ever gets to knowing when the recording
+            # actually ended — the HUD ships a segment straight out of the
+            # recorder's onstop handler, so the two are milliseconds apart. Every
+            # later moment is worse by a whole transcription, and _follow_up_open
+            # explains why that difference decides whether the assistant can hear
+            # itself.
+            arrived = monotonic()
             if message["type"] == "websocket.disconnect":
                 break
 
@@ -702,7 +949,8 @@ async def ws_endpoint(websocket: WebSocket):
                 # for two seconds on a warm model — or for the length of a
                 # 460 MB download on the very first press after an install.
                 _utterances.add(job := asyncio.create_task(
-                    _handle_utterance(audio, ambient=_listen_modes.get(websocket, False))))
+                    _handle_utterance(audio, ambient=_listen_modes.get(websocket, False),
+                                      captured_at=arrived)))
                 job.add_done_callback(_utterances.discard)
                 continue
 

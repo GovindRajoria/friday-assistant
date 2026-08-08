@@ -28,6 +28,7 @@ selects a destructive skill never touches this node at all.
 """
 from langgraph.graph import END, StateGraph
 
+from core import intents
 from core.config import SETTINGS
 from core.nodes.act import act_node
 from core.nodes.anomaly_guard import anomaly_guard_node
@@ -151,6 +152,57 @@ def route_after_act(state: AgentState, active_skills: dict | None = None) -> str
     return "reason"
 
 
+def dispatch_node(state: AgentState, active_skills: dict) -> dict:
+    """Enter the loop with the tool already chosen, for questions about FRIDAY itself.
+
+    Returns the same shape `reason_node` does, so everything downstream — the
+    confirmation lookup, `act`, the `terminal` flag, the step count — behaves
+    exactly as it would had the model picked this tool.
+
+    EVERY DISPATCHED SKILL MUST BE `terminal`, and
+    tests/test_intents.py asserts it rather than trusting it. This node sets no
+    `messages`, because there is no model exchange to record — but `act` appends
+    its observation to whatever is there, so a non-terminal skill would route on
+    to `reason` with a message list holding one observation and *no system prompt
+    and no question*. `reason` only builds those when the list is empty, so it
+    would not recover; it would ask the model to continue a conversation whose
+    first line is an answer to a question it cannot see. All five skills reachable
+    from here return the complete reply, so the situation does not arise today,
+    and the test is what keeps a sixth rule from creating it.
+
+    See core/intents.py for the measurement that made this a node rather than a
+    prompt rule. `thought` is written here rather than generated because it is
+    spoken aloud before the tool runs, and a plan this specific does not need a
+    model to phrase it.
+    """
+    routed = intents.route(state.get("user_input", ""), active_skills)
+    if routed is None:                       # unreachable via the entry point
+        return {"steps": state.get("steps", 0) + 1}
+    skill, params = routed
+    return {
+        "thought": DISPATCH_THOUGHTS.get(skill, "Let me check."),
+        "action": skill,
+        "action_input": params,
+        "final_answer": "",
+        "steps": state.get("steps", 0) + 1,
+    }
+
+
+# One spoken line per deterministic route. Said before the skill runs, so each
+# is a plan and none of them previews the answer — the same rule the model's own
+# `thought` is held to.
+DISPATCH_THOUGHTS = {
+    "core_identity": "Let me tell you what I actually have loaded rather than guess.",
+    "explain_architecture": "I will read that out of my own architecture notes.",
+    "explain_last_turn": "Let me look at what I actually did.",
+    "diagnose_self": "Let me run through my own state and see.",
+    "skill_health": "Let me check which of my skills actually loaded.",
+    # Short on purpose: the answer is one sentence and it arrives immediately, so
+    # anything longer is spoken narration in front of a fact.
+    "world_time": "Let me check.",
+}
+
+
 def nudge_node(state: AgentState) -> dict:
     return {"messages": [*state["messages"], {"role": "user", "content":
             "That response had no action and no final answer. Either choose an "
@@ -162,6 +214,23 @@ def abort_node(state: AgentState) -> dict:
     # Returned as `final_answer` only — the driver speaks that on its own, and
     # putting it in `narration` too would say it twice.
     return {"final_answer": "I worked through several steps without reaching a conclusion, so I stopped."}
+
+
+def _entry_point(active_skills: dict):
+    """Which node a fresh turn starts at. A plain function of the text.
+
+    Kept out of build_graph as a named function so it can be tested without
+    compiling a graph, and so the ordering — conversation, then self-knowledge,
+    then the model — is written down once in something readable.
+    """
+    def choose(state: AgentState) -> str:
+        text = state.get("user_input", "")
+        if is_small_talk(text):
+            return "converse"
+        if intents.route(text, active_skills) is not None:
+            return "dispatch"
+        return "reason"
+    return choose
 
 
 def build_graph(active_skills: dict, confirm=None):
@@ -178,6 +247,7 @@ def build_graph(active_skills: dict, confirm=None):
     """
     graph = StateGraph(AgentState)
     graph.add_node("converse", converse_node)
+    graph.add_node("dispatch", lambda s: dispatch_node(s, active_skills))
     graph.add_node("conclude", conclude_node)
     graph.add_node("reason", lambda s: reason_node(s, active_skills))
     graph.add_node("confirm", lambda s: confirm_node(s, confirm))
@@ -193,11 +263,24 @@ def build_graph(active_skills: dict, confirm=None):
     # when the answer is to say hello back. `converse` calls the model with no
     # schema and no tool list, so a tool call is not something it can produce.
     # See core/small_talk.py for the live transcript that forced this.
+    #
+    # `dispatch` is the second such gate, for questions about FRIDAY itself. It
+    # is checked after small talk and before the model, because the model
+    # answers those from a generic self-image it is certain of and measurably
+    # wrong about — see core/intents.py for the two benchmark runs that
+    # established it. A message matching neither gate takes the ordinary path.
     graph.set_conditional_entry_point(
-        lambda s: "converse" if is_small_talk(s.get("user_input", "")) else "reason",
-        {"converse": "converse", "reason": "reason"},
+        _entry_point(active_skills),
+        {"converse": "converse", "dispatch": "dispatch", "reason": "reason"},
     )
     graph.add_edge("converse", END)
+    # Same edges as `reason`: a dispatched action is an action, and every gate
+    # that stands in front of a chosen tool has to stand in front of this one
+    # too. Nothing here is destructive today, and routing it through the same
+    # conditional is what keeps that from mattering if something ever is.
+    graph.add_conditional_edges("dispatch", lambda s: route_after_reason(s, active_skills),
+                                {"act": "act", "confirm": "confirm", "nudge": "nudge",
+                                 "abort": "abort", END: END})
     graph.add_conditional_edges("reason", lambda s: route_after_reason(s, active_skills),
                                 {"act": "act", "confirm": "confirm", "nudge": "nudge",
                                  "abort": "abort", END: END})

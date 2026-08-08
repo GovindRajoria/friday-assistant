@@ -96,3 +96,35 @@ def find(text: str, wake_word: str = "friday") -> tuple[bool, str]:
             return True, " ".join(tokens[index + 2:]).strip()
 
     return False, ""
+
+
+# Said to stop talking. Matched against the WHOLE utterance and never as a
+# prefix, which is the only thing keeping "stop the build" and "cancel the
+# deployment" — real requests, and destructive ones — from being swallowed as
+# commands to be quiet instead of carried out.
+#
+# The exactness also does most of the work against hearing itself. An answer is
+# spoken one sentence at a time and the microphone segments on silence, so a
+# sentence of the assistant's own speech can arrive here as a complete utterance;
+# what saves it is that "Stop." is not a sentence this assistant says. "I have
+# stopped the service" is, and it does not match.
+STOP_PHRASES = frozenset({
+    "stop", "stop it", "stop talking", "stop please",
+    "be quiet", "quiet", "quiet please", "shush", "hush",
+    "shut up", "enough", "thats enough", "that is enough",
+    "never mind", "nevermind", "forget it", "cancel", "cancel that",
+})
+
+
+def is_stop_command(text: str, wake_word: str = "friday") -> bool:
+    """Was that "be quiet", rather than something to do?
+
+    The name is optional and stripped either way: hands-free, "friday stop" and
+    "stop" are the same instruction, and requiring the name from someone trying to
+    interrupt would be the worst possible moment to insist on protocol.
+    """
+    wake_word = (wake_word or DEFAULT_WAKE_WORD).lower().strip()
+    tokens = _tokens(text)
+    while tokens and (tokens[0] in LEADING_FILLER or _matches(tokens[0], wake_word)):
+        tokens.pop(0)
+    return " ".join(tokens) in STOP_PHRASES
