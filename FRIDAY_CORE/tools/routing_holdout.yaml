@@ -1,0 +1,80 @@
+# Held-out request set. Scored by tools/routing_bench.py --cases tools/routing_holdout.yaml
+#
+# WHY THIS FILE EXISTS. `routing_cases.yaml` has now been tuned against four
+# separate times — a deterministic intent router, two skills built to answer
+# cases it contained, four description rewrites, and a per-turn shortlist whose
+# size was chosen by measuring recall over it. Every one of those changes was
+# measured on the same seventy-eight sentences. At that point a rising number
+# stops being evidence and starts being a possibility: the assistant may simply
+# have learned this file.
+#
+# So these eighteen were written AFTER all of it, in one sitting, without looking
+# at the scores, and are deliberately worded to avoid the vocabulary the
+# manifests use. "What's eating all my disk" rather than "how much disk space is
+# free"; "pop open the calculator" rather than "open the calculator"; "where did
+# I define the wake word matcher" rather than "find where something is defined".
+# That is the hard case for lexical shortlisting by construction — if the
+# shortlist only works when the request echoes the manifest, this is where it
+# shows.
+#
+# RULES FOR ADDING TO THIS FILE. Do not tune anything against it. The moment a
+# description or a constant is changed because of a case here, this file becomes
+# a second training set and stops being able to answer the only question it was
+# written to answer. If it is scored and something looks wrong, fix it against
+# `routing_cases.yaml`, or add a new case there, and come back to this one later.
+# `expect` is a list wherever more than one answer is genuinely defensible, on
+# the same principle as the tuned set.
+
+- group: the machine, said differently
+  cases:
+    - say: what's eating all my disk
+      expect: [disk_report]
+    - say: am I connected to the internet
+      expect: [network_status]
+    - say: is chrome hogging memory
+      expect: [manage_processes, system_check]
+    - say: power the machine off
+      expect: [power_control]
+
+- group: files and code, said differently
+  cases:
+    - say: wipe the scratch directory
+      expect: [manage_files]
+    - say: where did I define the wake word matcher
+      expect: [search_code]
+    - say: read me the top of that pdf on my desktop
+      expect: [read_document]
+    - say: grab a picture of my screen
+      expect: [screenshot]
+    - say: stick this on the clipboard for me
+      expect: [clipboard]
+
+- group: the outside world, said differently
+  cases:
+    - say: who won the cricket last night
+      expect: [web_search, read_news]
+    - say: how far ahead is Tokyo
+      expect: [world_time]
+    - say: pop open the calculator
+      expect: [launch_application]
+
+- group: no tool needed
+  cases:
+    - say: what's 18 percent of 2400
+      expect: [none]
+    - say: what does RTSP stand for
+      expect: [none]
+
+- group: life admin, said differently
+  cases:
+    - say: nudge me at six to leave
+      expect: [reminders]
+    - say: put a note in my diary that the deploy went fine
+      expect: [journal]
+
+- group: itself and its voice, said differently
+  cases:
+    - say: slow your speech down a bit
+      expect: [voice_control]
+    - say: what did you just tell me
+      expect: [explain_last_turn]

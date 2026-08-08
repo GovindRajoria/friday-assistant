@@ -20,7 +20,7 @@ installed on; no audio, camera frame, or transcript is sent to any cloud
 service, and there is no API key anywhere in the project.
 
 There are two processes. The backend is Python: a LangGraph state machine
-driving a local Llama 3.1 through Ollama, with eighteen skills discovered off
+driving a local Llama 3.1 through Ollama, with forty-eight skills discovered off
 the filesystem at startup. The front end is an Electron window that talks to
 that backend over a WebSocket on 127.0.0.1, showing every step of the
 reasoning as it happens rather than only the final answer. The same backend
@@ -179,6 +179,18 @@ than no ranking. And the size was measured rather than chosen: every case in the
 labelled set keeps its correct answer inside a list of eight, so ten ships, and
 `tests/test_shortlist.py` fails if that stops being true. That test needs no
 model, so unlike the benchmark it runs in CI.
+
+**And it is not overfitting, which is the obvious objection.** By this point the
+seventy-eight labelled cases had been tuned against four separate times, so a
+rising number had stopped being evidence on its own. Eighteen held-out requests
+were written afterwards in one sitting, worded to avoid the vocabulary the
+manifests use — "what's eating all my disk" rather than "how much disk space is
+free", "pop open the calculator" rather than "open the calculator" — which is the
+hard case for lexical shortlisting by construction. They score **83.3%** against
+84.6% on the tuned set, every one of them decided by the model rather than by a
+fast path. `tools/routing_holdout.yaml` says in its own header that nothing may
+ever be tuned against it, because the moment something is, it becomes a second
+training set and can no longer answer the only question it exists for.
 
 Two descriptions were rewritten on the strength of that recall test rather than
 the other way round. `system_check` did not contain the word "machine" and

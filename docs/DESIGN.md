@@ -553,6 +553,20 @@ word "machine" and `manage_memory` none of "remember", so the only words anybody
 says when asking for them appeared nowhere in the text being ranked. Adding a word
 the skill genuinely is about is not the same as a skill claiming ground next to it.
 
+**How the improvement was checked against itself.** Four separate changes had by
+then been measured on the same seventy-eight sentences, which is enough for the
+number to be measuring the answer key rather than the assistant. Eighteen held-out
+requests were written after the fact and deliberately phrased away from the
+manifests' own vocabulary; they score **83.3%** where the tuned set scores 84.6%,
+with every case decided by the model. A gap of a point and a bit is what
+generalisation looks like; a gap of twenty would have meant the shortlist only
+worked when the request echoed the description it was ranking against.
+
+The held-out file carries a rule in its header: **nothing may be tuned against
+it.** The temptation after reading its three misses is to fix them, and doing so
+would convert the only honest measurement in the project into a second training
+set. Fix things against `routing_cases.yaml`; come back to this one later.
+
 **What it changed about the remaining errors, which matters more than the score.** All three
 regressions were diagnosed, and in every one the correct skill was offered and the model chose
 something else — `task_list` ranked first by more than double the next score and was still declined

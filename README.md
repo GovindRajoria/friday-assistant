@@ -133,6 +133,39 @@ cd FRIDAY_CORE && python tools/check_manifests.py
 
 It reads the manifests with `ast` rather than importing them, so it needs none of the runtime dependencies and works on a machine with no model, no microphone and no camera.
 
+### Ten skills in the prompt, not forty-seven
+
+Discovering forty-eight skills is easy. Getting the model to pick the right one
+is the hard part, and it was measured at **56%** before anything was done about
+it. Four attempts to fix that by giving the model *more* information all failed —
+one of them, a schema field asking whether a tool was needed at all, took routing
+down to **39.7%**.
+
+The clue was in the misses and it was easy to misread. Several skills that *lost*
+a routing decision already carried a description naming the skill that should have
+won: `system_check` says "gpu_status for accelerators" and still beat `gpu_status`
+on "is the GPU being used". The information was present, correctly worded, in the
+prompt, and not read. Forty-seven descriptions is about eight thousand tokens.
+
+`core/shortlist.py` scores the loaded skills against the request and puts roughly
+ten of them in the system prompt and in the enum. **70.5% → 84.6%**, with no
+description changed, and every long-standing miss cleared at once.
+
+The scoring is lexical, weighted by inverse document frequency across the
+manifests themselves — which is what makes a lexical approach work here. "Use" and
+"this" appear in every description and price at zero; "clipboard" appears in one
+and prices high. It is not semantic because there is no embedding model installed,
+and adding one to rank forty-seven short documents would be a large dependency for
+a small job.
+
+**The failure it must not have is omitting the right tool**, because the enum is
+built from the same subset — a skill that is not offered cannot be named, however
+obvious the request. Two rules guard it: below a floor score the whole registry is
+returned, since a ranking built on noise is worse than no ranking; and the list
+size was measured rather than chosen, with a test asserting that every labelled
+case keeps its answer inside the list. That test needs no model, so unlike the
+benchmark it runs in CI.
+
 ### Interrupts
 
 `core/interrupt_handler.py` runs a global `pynput` keyboard listener. Pressing **Delete** mid-thought sets a flag the graph driver checks on every streamed update, so a reasoning chain that has gone off the rails can be killed without terminating the process.
@@ -916,7 +949,7 @@ the reasoning behind them: [docs/DESIGN.md](docs/DESIGN.md).
 
 Stated plainly, because they are the honest state of the project:
 
-- **Tool selection is measured at 84.6%, which means roughly one request in six still reaches for the wrong tool.** That number comes from `tools/routing_bench.py` against seventy-eight labelled spoken requests, and it is the honest figure rather than a flattering one: it is scored like-for-like across runs, and it counts a case as wrong even where the chosen tool is defensible. It has moved 56% -> 62% -> 70.5% -> 84.6% as the causes were found, and the largest single gain came from showing the model ten scored skills per request instead of all forty-seven — the information had been present and unread. What remains is mostly genuine ambiguity between neighbours (`search_files` against `search_code`, `send_keys` against `draft_document`) plus a mild tendency to answer "none" where a tool would have served. The benchmark needs Ollama and about three minutes, so it is not a CI gate; the shortlist's recall test is, because it needs no model. `skills.disabled` in `settings.yaml` remains the escape hatch if a group of skills turns out to confuse routing.
+- **Tool selection is measured at 84.6%, which means roughly one request in six still reaches for the wrong tool.** That number comes from `tools/routing_bench.py` against seventy-eight labelled spoken requests, and it is the honest figure rather than a flattering one: it is scored like-for-like across runs, and it counts a case as wrong even where the chosen tool is defensible. It has moved 56% -> 62% -> 70.5% -> 84.6% as the causes were found, and it is not an artefact of tuning against the answer key: eighteen held-out requests written after all of those changes, phrased away from the manifests' own vocabulary, score 83.3%. and the largest single gain came from showing the model ten scored skills per request instead of all forty-seven — the information had been present and unread. What remains is mostly genuine ambiguity between neighbours (`search_files` against `search_code`, `send_keys` against `draft_document`) plus a mild tendency to answer "none" where a tool would have served. The benchmark needs Ollama and about three minutes, so it is not a CI gate; the shortlist's recall test is, because it needs no model. `skills.disabled` in `settings.yaml` remains the escape hatch if a group of skills turns out to confuse routing.
 - **Several new skills are unverified against the thing they talk to.** `check_email` has never run against a live IMAP server — there is no mail account on the development machine, so its parsing and every error path are tested and the conversation with a real server is not. `calendar` is tested against `.ics` files this project generated, not against a real export from Outlook or Google. `track_price` ships disabled for the same class of reason: it works when called, and it has not run on a schedule over the weeks that would justify trusting it to.
 - **The ripgrep path in `search_files` and `search_code` is unexercised here.** `shutil.which("rg")` returns None on this machine, so the bounded Python scan is what actually runs. The ripgrep branch is written and unit-tested against its exit codes, and has never spoken to a real ripgrep.
 - **`calendar` implements a subset of recurrence, not RFC 5545.** `FREQ` of DAILY, WEEKLY, MONTHLY or YEARLY with `INTERVAL`, `UNTIL` and `COUNT`. Monthly and yearly steps are approximated as 30 and 365 days, so a "first Monday of the month" rule or a long monthly series will drift. Anything it cannot expand is reported as possibly missing rather than dropped silently, which makes the gap visible instead of mysterious.

@@ -245,6 +245,11 @@ def compare(previous_path, results, summary):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--cases", metavar="PATH", default=CASES_PATH,
+                        help="a case file other than routing_cases.yaml — "
+                             "tools/routing_holdout.yaml is the held-out set, which nothing "
+                             "has been tuned against and which is therefore the only honest "
+                             "answer to 'is this improvement real or did you fit the answer key'")
     parser.add_argument("--save", metavar="PATH", help="write the full result set to a JSON file")
     parser.add_argument("--compare", metavar="PATH", help="diff against a saved run")
     parser.add_argument("--group", action="append", help="only run groups whose name contains this")
@@ -253,7 +258,7 @@ def main(argv=None):
 
     from core.registry import discover_skills
 
-    cases = load_cases()
+    cases = load_cases(Path(args.cases))
     if args.group:
         cases = [c for c in cases if any(fragment.lower() in c["group"].lower() for fragment in args.group)]
         if not cases:
